@@ -13,29 +13,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-
       - uses: android-actions/setup-android@v3
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+      - run: chmod +x ./gradlew
+      - run: ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
         with:
-          name: kasir-debug-apk
+          name: iyonzkasir-apk
           path: app/build/outputs/apk/debug/*.apk
-
-      - name: Auto Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ github.run_number }}
-          name: Build ${{ github.run_number }}
+          name: iyonzkasir build ${{ github.run_number }}
           files: app/build/outputs/apk/debug/*.apk
