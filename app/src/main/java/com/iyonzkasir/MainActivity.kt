@@ -3,6 +3,7 @@ package com.iyonzkasir
 import android.app.Application
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -10,6 +11,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -23,7 +25,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -39,13 +40,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavHostController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
 import androidx.room.*
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.File
@@ -54,45 +59,130 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 // ═══════════════════════════════════════════════════════════
-// HELPERS
+// KONSTANTA & HELPER
 // ═══════════════════════════════════════════════════════════
-fun Int.rupiah(): String =
-    "Rp " + NumberFormat.getNumberInstance(Locale("in", "ID")).format(this)
 
-fun Long.tanggal(): String =
-    SimpleDateFormat("dd MMM HH:mm", Locale("in", "ID")).format(Date(this))
+private val rupiahFormat: NumberFormat by lazy {
+    NumberFormat.getNumberInstance(Locale("in", "ID"))
+}
+
+private val dateFormatLocal = object : ThreadLocal<SimpleDateFormat>() {
+    override fun initialValue() = SimpleDateFormat("dd MMM HH:mm", Locale("in", "ID"))
+}
+
+fun Int.rupiah(): String = "Rp " + rupiahFormat.format(this)
+
+fun Long.tanggal(): String = dateFormatLocal.get()!!.format(Date(this))
+
+fun String.toRupiahOrNull(): Int? =
+    filter { it.isDigit() }.takeIf { it.isNotEmpty() }?.toIntOrNull()
 
 val BRAND = Color(0xFFFF6B35)
 val BRAND_LIGHT = Color(0xFFFFE4D6)
+val BRAND_DARK = Color(0xFF7A2E10)
+
+enum class TipeOrder(val label: String) {
+    DINE_IN("Dine-in"),
+    TAKE_AWAY("Take-away"),
+    DELIVERY("Delivery");
+
+    companion object {
+        fun fromKey(k: String) = entries.firstOrNull { it.name == k } ?: DINE_IN
+    }
+}
+
+enum class MetodeBayar(val label: String) {
+    CASH("Cash"), QRIS("QRIS"), DEBIT("Debit")
+}
+
+enum class StatusOrder { OPEN, PAID }
+
+// ═══════════════════════════════════════════════════════════
+// IMAGE HELPERS — simpan ke internal storage, bukan content://
+// ═══════════════════════════════════════════════════════════
+
+object MenuImageStore {
+
+    private const val DIR_NAME = "menu_images"
+
+    private fun dir(context: Context): File =
+        File(context.filesDir, DIR_NAME).apply { mkdirs() }
+
+    /**
+     * Copy content Uri (dari galeri) ke internal storage app.
+     * Return absolute path file lokal, atau null kalau gagal.
+     */
+    fun copyFromUri(context: Context, uri: Uri): String? = runCatching {
+        val target = File(dir(context), "menu_${System.currentTimeMillis()}.jpg")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { output -> input.copyTo(output) }
+        }
+        if (target.length() > 0) target.absolutePath else null
+    }.getOrNull()
+
+    /**
+     * Hapus file gambar lokal. Return true kalau file ada & terhapus.
+     * Aman dipanggil berkali-kali.
+     */
+    fun delete(path: String?): Boolean {
+        if (path.isNullOrBlank()) return false
+        return runCatching {
+            val f = File(path)
+            f.exists() && f.delete()
+        }.getOrDefault(false)
+    }
+
+    /** Cek file masih ada (buat fallback UI). */
+    fun exists(path: String?): Boolean =
+        !path.isNullOrBlank() && File(path).exists()
+}
 
 // ═══════════════════════════════════════════════════════════
 // DATA LAYER
 // ═══════════════════════════════════════════════════════════
-@Entity(tableName = "menu_items")
+
+@Entity(
+    tableName = "menu_items",
+    indices = [Index("kategori"), Index("nama")]
+)
 data class MenuItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val nama: String,
     val harga: Int,
     val kategori: String = "Umum",
-    val fotoUri: String? = null,
+    val fotoUri: String? = null, // sekarang: absolute path file lokal
     val tersedia: Boolean = true
 )
 
-@Entity(tableName = "orders")
+@Entity(
+    tableName = "orders",
+    indices = [Index("status"), Index("timestamp")]
+)
 data class Order(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val timestamp: Long = 0,
     val nomorMeja: String = "",
-    val tipeOrder: String = "DINE_IN",
+    val tipeOrder: String = TipeOrder.DINE_IN.name,
     val namaPelanggan: String = "",
     val total: Int = 0,
     val metodeBayar: String = "",
     val dibayar: Int = 0,
     val kembalian: Int = 0,
-    val status: String = "OPEN" // OPEN | PAID
+    val status: String = StatusOrder.OPEN.name
 )
 
-@Entity(tableName = "order_items")
+@Entity(
+    tableName = "order_items",
+    indices = [Index("orderId"), Index("menuId")],
+    foreignKeys = [
+        ForeignKey(
+            entity = Order::class,
+            parentColumns = ["id"],
+            childColumns = ["orderId"],
+            onDelete = ForeignKey.CASCADE
+        )
+    ]
+)
 data class OrderItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val orderId: Long = 0,
@@ -101,18 +191,32 @@ data class OrderItem(
     val hargaSatuan: Int = 0,
     val qty: Int = 1,
     val catatan: String = ""
-) { val subtotal: Int get() = hargaSatuan * qty }
+) {
+    val subtotal: Int get() = hargaSatuan * qty
+}
+
+data class OrderWithItems(
+    @Embedded val order: Order,
+    @Relation(parentColumn = "id", entityColumn = "orderId")
+    val items: List<OrderItem>
+)
+
+// ─── DAO ───────────────────────────────────────────────────
 
 @Dao
 interface MenuDao {
     @Query("SELECT * FROM menu_items ORDER BY kategori, nama")
     fun observeAll(): Flow<List<MenuItem>>
+
     @Query("SELECT * FROM menu_items WHERE id = :id")
     suspend fun getById(id: Long): MenuItem?
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+
+    @Upsert
     suspend fun upsert(item: MenuItem): Long
+
     @Delete
     suspend fun delete(item: MenuItem)
+
     @Query("UPDATE menu_items SET tersedia = :tersedia WHERE id = :id")
     suspend fun setTersedia(id: Long, tersedia: Boolean)
 }
@@ -139,17 +243,23 @@ interface OrderDao {
         insertItems(items.map { it.copy(orderId = order.id) })
     }
 
+    @Transaction
     @Query("SELECT * FROM orders WHERE status = 'OPEN' ORDER BY timestamp DESC")
     fun observeOpenBills(): Flow<List<Order>>
 
+    @Transaction
     @Query("SELECT * FROM orders WHERE status = 'PAID' ORDER BY timestamp DESC")
     fun observePaid(): Flow<List<Order>>
+
+    @Transaction
+    @Query("SELECT * FROM orders WHERE id = :id")
+    suspend fun getOrderWithItems(id: Long): OrderWithItems?
 
     @Query("SELECT * FROM orders WHERE id = :id")
     suspend fun getOrder(id: Long): Order?
 
-    @Query("SELECT * FROM order_items WHERE orderId = :orderId")
-    suspend fun itemsOf(orderId: Long): List<OrderItem>
+    @Query("SELECT COUNT(*) FROM orders WHERE status = 'OPEN'")
+    fun observeOpenCount(): Flow<Int>
 }
 
 @Database(
@@ -160,6 +270,7 @@ interface OrderDao {
 abstract class AppDatabase : RoomDatabase() {
     abstract fun menuDao(): MenuDao
     abstract fun orderDao(): OrderDao
+
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
         fun get(context: Context): AppDatabase =
@@ -168,66 +279,126 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "iyonzkasir.db"
-                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+                ).fallbackToDestructiveMigration()
+                    .build()
+                    .also { INSTANCE = it }
             }
     }
 }
 
-class PosRepository(private val menuDao: MenuDao, private val orderDao: OrderDao) {
+// ─── Repository ────────────────────────────────────────────
+
+sealed interface DataResult<out T> {
+    data class Success<T>(val data: T) : DataResult<T>
+    data class Error(val throwable: Throwable) : DataResult<Nothing>
+}
+
+suspend fun <T> safeCall(block: suspend () -> T): DataResult<T> = try {
+    DataResult.Success(block())
+} catch (e: CancellationException) {
+    throw e
+} catch (t: Throwable) {
+    DataResult.Error(t)
+}
+
+class PosRepository(
+    private val menuDao: MenuDao,
+    private val orderDao: OrderDao
+) {
     val menu: Flow<List<MenuItem>> = menuDao.observeAll()
     val openBills: Flow<List<Order>> = orderDao.observeOpenBills()
     val paidOrders: Flow<List<Order>> = orderDao.observePaid()
+    val openBillCount: Flow<Int> = orderDao.observeOpenCount()
 
-    suspend fun upsertMenu(item: MenuItem) = menuDao.upsert(item)
-    suspend fun deleteMenu(item: MenuItem) = menuDao.delete(item)
-    suspend fun setTersedia(id: Long, v: Boolean) = menuDao.setTersedia(id, v)
-    suspend fun getMenu(id: Long) = menuDao.getById(id)
+    suspend fun upsertMenu(item: MenuItem): DataResult<Long> =
+        safeCall { menuDao.upsert(item) }
 
-    suspend fun simpanOrder(order: Order, items: List<OrderItem>) =
-        orderDao.simpanOrder(order, items)
-    suspend fun updateOrderWithItems(order: Order, items: List<OrderItem>) =
-        orderDao.updateOrderWithItems(order, items)
-    suspend fun getOrder(id: Long) = orderDao.getOrder(id)
-    suspend fun itemsOf(orderId: Long) = orderDao.itemsOf(orderId)
+    suspend fun deleteMenu(item: MenuItem): DataResult<Unit> =
+        safeCall { menuDao.delete(item) }
+
+    suspend fun setTersedia(id: Long, v: Boolean): DataResult<Unit> =
+        safeCall { menuDao.setTersedia(id, v) }
+
+    suspend fun getMenu(id: Long): MenuItem? = menuDao.getById(id)
+
+    suspend fun simpanOrder(order: Order, items: List<OrderItem>): DataResult<Long> =
+        safeCall { orderDao.simpanOrder(order, items) }
+
+    suspend fun updateOrderWithItems(order: Order, items: List<OrderItem>): DataResult<Unit> =
+        safeCall { orderDao.updateOrderWithItems(order, items) }
+
+    suspend fun getOrder(id: Long): Order? = orderDao.getOrder(id)
+    suspend fun getOrderWithItems(id: Long) = orderDao.getOrderWithItems(id)
 }
 
 // ═══════════════════════════════════════════════════════════
 // VIEWMODELS
 // ═══════════════════════════════════════════════════════════
+
+sealed interface UiEvent {
+    data class ShowMessage(val text: String) : UiEvent
+}
+
 data class CartLine(
-    val key: String, // menuId + "|" + catatan
+    val key: String,
     val menu: MenuItem,
     val qty: Int,
     val catatan: String = ""
-) { val subtotal: Int get() = menu.harga * qty }
+) {
+    val subtotal: Int get() = menu.harga * qty
+}
+
+// ─── KasirViewModel ────────────────────────────────────────
 
 class KasirViewModel(private val repo: PosRepository) : ViewModel() {
 
     val menu: StateFlow<List<MenuItem>> = repo.menu
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    // Meta info order
+    private val _events = Channel<UiEvent>(Channel.BUFFERED)
+    val events: Flow<UiEvent> = _events.receiveAsFlow()
+
     var nomorMeja by mutableStateOf("")
-    var tipeOrder by mutableStateOf("DINE_IN")
+        private set
+    var tipeOrder by mutableStateOf(TipeOrder.DINE_IN)
+        private set
     var namaPelanggan by mutableStateOf("")
-    var editingOrderId by mutableStateOf<Long?>(null) // kalau lagi edit open bill
+        private set
+    var editingOrderId by mutableStateOf<Long?>(null)
+        private set
 
-    // Search
     var searchQuery by mutableStateOf("")
     var kategoriFilter by mutableStateOf<String?>(null)
 
     private val _cart = MutableStateFlow<Map<String, CartLine>>(emptyMap())
-    val cart: StateFlow<List<CartLine>> = _cart.map { it.values.toList() }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val total: StateFlow<Int> = cart.map { it.sumOf { l -> l.subtotal } }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val cart: StateFlow<List<CartLine>> = _cart
+        .map { it.values.toList() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val total: StateFlow<Int> = _cart
+        .map { map -> map.values.sumOf { it.subtotal } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    val itemCount: StateFlow<Int> = _cart
+        .map { map -> map.values.sumOf { it.qty } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0)
+
+    var isSaving by mutableStateOf(false)
+        private set
+
+    fun setNomorMeja(v: String) { nomorMeja = v.filter { it.isDigit() } }
+    fun setTipeOrder(t: TipeOrder) { tipeOrder = t }
+    fun setNamaPelanggan(v: String) { namaPelanggan = v }
 
     fun add(menu: MenuItem, catatan: String = "") {
-        val key = "${menu.id}|$catatan"
+        val key = cartKey(menu.id, catatan)
         _cart.update { map ->
-            val e = map[key]
-            if (e == null) map + (key to CartLine(key, menu, 1, catatan))
-            else map + (key to e.copy(qty = e.qty + 1))
+            val existing = map[key]
+            map + (key to if (existing == null) {
+                CartLine(key, menu, 1, catatan)
+            } else {
+                existing.copy(qty = existing.qty + 1)
+            })
         }
     }
 
@@ -237,131 +408,210 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
     }
 
     fun remove(key: String) { _cart.update { it - key } }
+
+    fun updateNote(oldKey: String, newNote: String) {
+        _cart.update { map ->
+            val line = map[oldKey] ?: return@update map
+            if (line.catatan == newNote) return@update map
+            val newKey = cartKey(line.menu.id, newNote)
+            (map - oldKey) + (newKey to line.copy(key = newKey, catatan = newNote))
+        }
+    }
+
     fun clearCart() { _cart.value = emptyMap() }
 
     fun resetOrder() {
         nomorMeja = ""
-        tipeOrder = "DINE_IN"
+        tipeOrder = TipeOrder.DINE_IN
         namaPelanggan = ""
         editingOrderId = null
         clearCart()
     }
 
-    fun loadOpenBill(orderId: Long) {
+    fun loadOpenBill(orderId: Long, onLoaded: () -> Unit = {}) {
         viewModelScope.launch {
-            val order = repo.getOrder(orderId) ?: return@launch
-            val items = repo.itemsOf(orderId)
+            val order = repo.getOrder(orderId)
+            if (order == null) {
+                _events.send(UiEvent.ShowMessage("Order tidak ditemukan"))
+                return@launch
+            }
+            val items = repo.getOrderWithItems(orderId)?.items.orEmpty()
+
+            val newCart = items.associate { item ->
+                val key = cartKey(item.menuId, item.catatan)
+                val menuItem = repo.getMenu(item.menuId) ?: MenuItem(
+                    id = item.menuId,
+                    nama = item.namaMenu,
+                    harga = item.hargaSatuan
+                )
+                key to CartLine(key, menuItem, item.qty, item.catatan)
+            }
+
             nomorMeja = order.nomorMeja
-            tipeOrder = order.tipeOrder
+            tipeOrder = TipeOrder.fromKey(order.tipeOrder)
             namaPelanggan = order.namaPelanggan
             editingOrderId = order.id
-            _cart.value = items.associate { it ->
-                val key = "${it.menuId}|${it.catatan}"
-                val menuItem = repo.getMenu(it.menuId) ?: MenuItem(
-                    id = it.menuId, nama = it.namaMenu, harga = it.hargaSatuan
-                )
-                key to CartLine(key, menuItem, it.qty, it.catatan)
+            _cart.value = newCart
+            onLoaded()
+        }
+    }
+
+    fun simpanOpenBill() {
+        if (isSaving) return
+        val lines = _cart.value.values.toList()
+        if (lines.isEmpty()) {
+            viewModelScope.launch { _events.send(UiEvent.ShowMessage("Keranjang kosong")) }
+            return
+        }
+        viewModelScope.launch {
+            isSaving = true
+            try {
+                when (val result = persist(lines, markAsPaid = false, metode = null, dibayar = 0)) {
+                    is DataResult.Success -> {
+                        resetOrder()
+                        _events.send(UiEvent.ShowMessage("Open bill tersimpan"))
+                    }
+                    is DataResult.Error -> _events.send(
+                        UiEvent.ShowMessage("Gagal simpan: ${result.throwable.message}")
+                    )
+                }
+            } finally {
+                isSaving = false
             }
         }
     }
 
-    /** Simpan sebagai open bill (belum bayar). */
-    fun simpanOpenBill(onDone: () -> Unit) {
-        val lines = cart.value
-        if (lines.isEmpty()) return
+    fun checkout(metode: MetodeBayar, dibayar: Int, onSuccess: (Long) -> Unit) {
+        if (isSaving) return
+        val lines = _cart.value.values.toList()
+        if (lines.isEmpty()) {
+            viewModelScope.launch { _events.send(UiEvent.ShowMessage("Keranjang kosong")) }
+            return
+        }
         viewModelScope.launch {
-            val totalInt = lines.sumOf { it.subtotal }
-            val items = lines.map {
-                OrderItem(
-                    orderId = 0, menuId = it.menu.id, namaMenu = it.menu.nama,
-                    hargaSatuan = it.menu.harga, qty = it.qty, catatan = it.catatan
-                )
+            isSaving = true
+            try {
+                when (val result = persist(lines, true, metode, dibayar)) {
+                    is DataResult.Success -> {
+                        resetOrder()
+                        onSuccess(result.data)
+                    }
+                    is DataResult.Error -> _events.send(
+                        UiEvent.ShowMessage("Gagal checkout: ${result.throwable.message}")
+                    )
+                }
+            } finally {
+                isSaving = false
             }
-            val existingId = editingOrderId
-            if (existingId != null) {
-                val order = Order(
-                    id = existingId, timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    metodeBayar = "", dibayar = 0, kembalian = 0, status = "OPEN"
-                )
-                repo.updateOrderWithItems(order, items)
-            } else {
-                val order = Order(
-                    timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    metodeBayar = "", dibayar = 0, kembalian = 0, status = "OPEN"
-                )
-                repo.simpanOrder(order, items)
-            }
-            resetOrder()
-            onDone()
         }
     }
 
-    /** Bayar sekarang (langsung PAID). */
-    fun checkout(metode: String, dibayar: Int, onDone: (Long) -> Unit) {
-        val lines = cart.value
-        if (lines.isEmpty()) return
-        viewModelScope.launch {
-            val totalInt = lines.sumOf { it.subtotal }
-            val items = lines.map {
-                OrderItem(
-                    orderId = 0, menuId = it.menu.id, namaMenu = it.menu.nama,
-                    hargaSatuan = it.menu.harga, qty = it.qty, catatan = it.catatan
-                )
+    private suspend fun persist(
+        lines: List<CartLine>,
+        markAsPaid: Boolean,
+        metode: MetodeBayar?,
+        dibayar: Int
+    ): DataResult<Long> {
+        val totalInt = lines.sumOf { it.subtotal }
+        val items = lines.map {
+            OrderItem(
+                orderId = 0,
+                menuId = it.menu.id,
+                namaMenu = it.menu.nama,
+                hargaSatuan = it.menu.harga,
+                qty = it.qty,
+                catatan = it.catatan
+            )
+        }
+        val existingId = editingOrderId
+        val orderBase = Order(
+            id = existingId ?: 0,
+            timestamp = System.currentTimeMillis(),
+            nomorMeja = nomorMeja,
+            tipeOrder = tipeOrder.name,
+            namaPelanggan = namaPelanggan,
+            total = totalInt,
+            metodeBayar = metode?.name.orEmpty(),
+            dibayar = if (markAsPaid) dibayar else 0,
+            kembalian = if (markAsPaid) (dibayar - totalInt).coerceAtLeast(0) else 0,
+            status = if (markAsPaid) StatusOrder.PAID.name else StatusOrder.OPEN.name
+        )
+
+        return if (existingId != null) {
+            when (val r = repo.updateOrderWithItems(orderBase, items)) {
+                is DataResult.Success -> DataResult.Success(existingId)
+                is DataResult.Error -> r
             }
-            val existingId = editingOrderId
-            val id: Long
-            if (existingId != null) {
-                val order = Order(
-                    id = existingId, timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    metodeBayar = metode, dibayar = dibayar,
-                    kembalian = (dibayar - totalInt).coerceAtLeast(0), status = "PAID"
-                )
-                repo.updateOrderWithItems(order, items)
-                id = existingId
-            } else {
-                val order = Order(
-                    timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    metodeBayar = metode, dibayar = dibayar,
-                    kembalian = (dibayar - totalInt).coerceAtLeast(0), status = "PAID"
-                )
-                id = repo.simpanOrder(order, items)
-            }
-            resetOrder()
-            onDone(id)
+        } else {
+            repo.simpanOrder(orderBase, items)
         }
     }
+
+    private fun cartKey(menuId: Long, catatan: String) = "$menuId|$catatan"
 }
 
+// ─── MenuViewModel (dengan image lifecycle) ────────────────
+
 class MenuViewModel(private val repo: PosRepository) : ViewModel() {
+
     val menu: StateFlow<List<MenuItem>> = repo.menu
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    fun save(item: MenuItem, onDone: () -> Unit = {}) = viewModelScope.launch {
-        repo.upsertMenu(item); onDone()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val _events = Channel<UiEvent>(Channel.BUFFERED)
+    val events: Flow<UiEvent> = _events.receiveAsFlow()
+
+    /**
+     * Simpan menu. Kalau oldImagePath != newImagePath (dan oldImagePath != null),
+     * hapus file gambar lama biar gak numpuk di storage.
+     */
+    fun save(
+        item: MenuItem,
+        oldImagePath: String? = null,
+        onDone: () -> Unit = {}
+    ) = viewModelScope.launch {
+        when (val result = repo.upsertMenu(item)) {
+            is DataResult.Success -> {
+                // Hapus file gambar lama kalau beda dari yang baru
+                if (!oldImagePath.isNullOrBlank() && oldImagePath != item.fotoUri) {
+                    MenuImageStore.delete(oldImagePath)
+                }
+                onDone()
+            }
+            is DataResult.Error -> _events.send(UiEvent.ShowMessage("Gagal simpan menu"))
+        }
     }
-    fun delete(item: MenuItem) = viewModelScope.launch { repo.deleteMenu(item) }
+
+    fun delete(item: MenuItem) = viewModelScope.launch {
+        when (val result = repo.deleteMenu(item)) {
+            is DataResult.Success -> {
+                // Hapus file gambar dari storage juga
+                MenuImageStore.delete(item.fotoUri)
+                _events.send(UiEvent.ShowMessage("${item.nama} dihapus"))
+            }
+            is DataResult.Error -> _events.send(UiEvent.ShowMessage("Gagal hapus"))
+        }
+    }
+
     fun toggle(item: MenuItem) = viewModelScope.launch {
         repo.setTersedia(item.id, !item.tersedia)
     }
+
     suspend fun get(id: Long) = repo.getMenu(id)
 }
 
+// ─── OpenBill / Riwayat ────────────────────────────────────
+
 class OpenBillViewModel(repo: PosRepository) : ViewModel() {
     val openBills: StateFlow<List<Order>> = repo.openBills
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }
 
 class RiwayatViewModel(repo: PosRepository) : ViewModel() {
     val orders: StateFlow<List<Order>> = repo.paidOrders
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 }
+
+// ─── Factory ───────────────────────────────────────────────
 
 class VMFactory(private val repo: PosRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
@@ -375,10 +625,73 @@ class VMFactory(private val repo: PosRepository) : ViewModelProvider.Factory {
 }
 
 // ═══════════════════════════════════════════════════════════
+// REUSABLE COMPONENTS
+// ═══════════════════════════════════════════════════════════
+
+/**
+ * Wrapper AsyncImage yang bener:
+ * - Menerima path file lokal ATAU URL/content URI
+ * - Placeholder + error state (biar gak blank)
+ * - Crossfade biar smooth
+ */
+@Composable
+fun MenuImage(
+    path: String?,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop
+) {
+    val ctx = LocalContext.current
+    val hasImage = remember(path) { MenuImageStore.exists(path) }
+
+    if (hasImage && path != null) {
+        AsyncImage(
+            model = ImageRequest.Builder(ctx)
+                .data(File(path))    // file lokal (absolute path)
+                .crossfade(true)
+                .build(),
+            contentDescription = contentDescription,
+            contentScale = contentScale,
+            modifier = modifier
+        )
+    } else {
+        // Fallback emoji kalau gak ada gambar
+        Box(
+            modifier.background(MaterialTheme.colorScheme.surfaceVariant),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("🍽️", style = MaterialTheme.typography.headlineSmall)
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(
+    emoji: String,
+    title: String,
+    subtitle: String,
+    modifier: Modifier = Modifier
+) {
+    Box(modifier, contentAlignment = Alignment.Center) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(emoji, style = MaterialTheme.typography.displaySmall)
+            Spacer(Modifier.height(8.dp))
+            Text(title, fontWeight = FontWeight.SemiBold)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 // SCREENS
 // ═══════════════════════════════════════════════════════════
 
-// ---------- KASIR (adaptive) ----------
+// ─── Kasir ─────────────────────────────────────────────────
+
 @Composable
 fun KasirScreen(
     vm: KasirViewModel,
@@ -391,44 +704,47 @@ fun KasirScreen(
             Row(Modifier.fillMaxSize()) {
                 MenuPane(vm, Modifier.weight(1f), isTablet = true)
                 VerticalDivider()
-                CartPane(
-                    vm = vm,
-                    modifier = Modifier.width(380.dp),
-                    onBayar = onBayar
-                )
+                CartPane(vm, Modifier.width(380.dp), onBayar)
             }
         } else {
             MenuPane(vm, Modifier.fillMaxSize(), isTablet = false)
-            // Bottom bar cart (mobile)
-            val cart by vm.cart.collectAsState()
-            val total by vm.total.collectAsState()
-            if (cart.isNotEmpty()) {
-                Box(Modifier.fillMaxSize()) {
-                    Surface(
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .fillMaxWidth(),
-                        shadowElevation = 8.dp,
-                        color = MaterialTheme.colorScheme.surface
-                    ) {
-                        Row(
-                            Modifier.fillMaxWidth().padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(Modifier.weight(1f)) {
-                                Text("${cart.sumOf { it.qty }} item",
-                                    style = MaterialTheme.typography.bodySmall)
-                                Text(total.rupiah(), fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleLarge)
-                            }
-                            Button(onClick = onOpenKeranjang,
-                                colors = ButtonDefaults.buttonColors(containerColor = BRAND)) {
-                                Icon(Icons.Default.ShoppingCart, null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Keranjang")
-                            }
-                        }
-                    }
+            MobileCartBar(vm, onOpenKeranjang)
+        }
+    }
+}
+
+@Composable
+private fun MobileCartBar(vm: KasirViewModel, onOpenKeranjang: () -> Unit) {
+    val cart by vm.cart.collectAsState()
+    val total by vm.total.collectAsState()
+    val itemCount by vm.itemCount.collectAsState()
+    if (cart.isEmpty()) return
+
+    Box(Modifier.fillMaxSize()) {
+        Surface(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
+            shadowElevation = 8.dp,
+            color = MaterialTheme.colorScheme.surface
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("$itemCount item", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        total.rupiah(),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge
+                    )
+                }
+                Button(
+                    onClick = onOpenKeranjang,
+                    colors = ButtonDefaults.buttonColors(containerColor = BRAND)
+                ) {
+                    Icon(Icons.Default.ShoppingCart, null)
+                    Spacer(Modifier.width(6.dp))
+                    Text("Keranjang")
                 }
             }
         }
@@ -439,11 +755,16 @@ fun KasirScreen(
 @Composable
 fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolean) {
     val menu by vm.menu.collectAsState()
-    val kategoriList = remember(menu) { listOf(null) + menu.map { it.kategori }.distinct() }
-    val filtered = remember(menu, vm.searchQuery, vm.kategoriFilter) {
-        menu.filter {
-            (vm.kategoriFilter == null || it.kategori == vm.kategoriFilter) &&
-            (vm.searchQuery.isBlank() || it.nama.contains(vm.searchQuery, ignoreCase = true))
+    val kategoriList = remember(menu) {
+        listOf<String?>(null) + menu.map { it.kategori }.distinct()
+    }
+    val filtered by remember(menu, vm.searchQuery, vm.kategoriFilter) {
+        derivedStateOf {
+            menu.filter {
+                (vm.kategoriFilter == null || it.kategori == vm.kategoriFilter) &&
+                        (vm.searchQuery.isBlank() ||
+                                it.nama.contains(vm.searchQuery, ignoreCase = true))
+            }
         }
     }
 
@@ -453,33 +774,34 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
             TopAppBar(
                 title = {
                     Column {
-                        Text("iyonzkasir",
+                        Text(
+                            "iyonzkasir",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = BRAND)
+                            color = BRAND
+                        )
                         Text(
                             if (vm.nomorMeja.isBlank()) "Belum pilih meja"
-                            else "Meja ${vm.nomorMeja} • ${tipeOrderLabel(vm.tipeOrder)}",
+                            else "Meja ${vm.nomorMeja} • ${vm.tipeOrder.label}",
                             style = MaterialTheme.typography.bodySmall
                         )
                     }
                 },
                 actions = {
-                    IconButton(onClick = { /* TODO dialog meja */ }) {
-                        Icon(Icons.Default.TableRestaurant, null)
+                    if (vm.editingOrderId != null) {
+                        AssistChip(
+                            onClick = { vm.resetOrder() },
+                            label = { Text("Batal Edit") },
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+                }
             )
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            // Meja + tipe order
             OrderMetaBar(vm)
 
-            // Search
             OutlinedTextField(
                 value = vm.searchQuery,
                 onValueChange = { vm.searchQuery = it },
@@ -496,7 +818,6 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
             )
 
-            // Kategori
             LazyRow(
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -512,12 +833,13 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
             }
 
             if (filtered.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        if (menu.isEmpty()) "Belum ada menu. Tambah di tab Menu ya 🍽️"
-                        else "Nggak ada menu yang cocok"
-                    )
-                }
+                EmptyState(
+                    emoji = if (menu.isEmpty()) "🍽️" else "🔍",
+                    title = if (menu.isEmpty()) "Belum ada menu" else "Nggak ada yang cocok",
+                    subtitle = if (menu.isEmpty()) "Tambah menu di tab Menu ya"
+                    else "Coba kata kunci lain",
+                    modifier = Modifier.fillMaxSize()
+                )
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(if (isTablet) 3 else 2),
@@ -544,25 +866,16 @@ private fun OrderMetaBar(vm: KasirViewModel) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Chip meja
         AssistChip(
             onClick = { showDialog = true },
             leadingIcon = { Icon(Icons.Default.TableRestaurant, null, Modifier.size(18.dp)) },
             label = { Text(if (vm.nomorMeja.isBlank()) "Pilih Meja" else "Meja ${vm.nomorMeja}") }
         )
-        // Tipe order
-        listOf("DINE_IN" to "Dine-in", "TAKE_AWAY" to "Take-away", "DELIVERY" to "Delivery")
-            .forEach { (k, label) ->
-                FilterChip(
-                    selected = vm.tipeOrder == k,
-                    onClick = { vm.tipeOrder = k },
-                    label = { Text(label, style = MaterialTheme.typography.bodySmall) }
-                )
-            }
-        if (vm.editingOrderId != null) {
-            AssistChip(
-                onClick = { vm.resetOrder() },
-                label = { Text("Batal Edit", color = MaterialTheme.colorScheme.error) }
+        TipeOrder.entries.forEach { t ->
+            FilterChip(
+                selected = vm.tipeOrder == t,
+                onClick = { vm.setTipeOrder(t) },
+                label = { Text(t.label, style = MaterialTheme.typography.bodySmall) }
             )
         }
     }
@@ -580,20 +893,22 @@ private fun OrderMetaBar(vm: KasirViewModel) {
                         onValueChange = { tempMeja = it.filter { c -> c.isDigit() } },
                         label = { Text("Nomor meja") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                     OutlinedTextField(
                         value = tempNama,
                         onValueChange = { tempNama = it },
                         label = { Text("Nama pelanggan (opsional)") },
-                        singleLine = true, modifier = Modifier.fillMaxWidth()
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.nomorMeja = tempMeja
-                    vm.namaPelanggan = tempNama
+                    vm.setNomorMeja(tempMeja)
+                    vm.setNamaPelanggan(tempNama)
                     showDialog = false
                 }) { Text("Simpan") }
             },
@@ -604,13 +919,6 @@ private fun OrderMetaBar(vm: KasirViewModel) {
     }
 }
 
-fun tipeOrderLabel(k: String) = when (k) {
-    "DINE_IN" -> "Dine-in"
-    "TAKE_AWAY" -> "Take-away"
-    "DELIVERY" -> "Delivery"
-    else -> k
-}
-
 @Composable
 private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
     Card(
@@ -619,34 +927,39 @@ private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
         shape = RoundedCornerShape(12.dp)
     ) {
         Column {
-            Box(Modifier.fillMaxWidth().height(100.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant)) {
-                m.fotoUri?.let {
-                    AsyncImage(
-                        model = File(it), contentDescription = m.nama,
-                        contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize()
-                    )
-                }
+            Box(Modifier.fillMaxWidth().height(100.dp)) {
+                MenuImage(
+                    path = m.fotoUri,
+                    contentDescription = m.nama,
+                    modifier = Modifier.fillMaxSize()
+                )
                 if (!enabled) {
-                    Box(Modifier.fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f)),
+                    Box(
+                        Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
                         contentAlignment = Alignment.Center
-                    ) { Text("Habis", color = Color.White, fontWeight = FontWeight.Bold) }
+                    ) {
+                        Text("Habis", color = Color.White, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
             Column(Modifier.padding(8.dp)) {
-                Text(m.nama, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(
+                    m.nama, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium)
+                    style = MaterialTheme.typography.bodyMedium
+                )
                 Spacer(Modifier.height(2.dp))
-                Text(m.harga.rupiah(), color = BRAND, fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    m.harga.rupiah(), color = BRAND, fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.bodyMedium
+                )
             }
         }
     }
 }
 
-// ---------- CART PANE (buat tablet, atau komponen shared) ----------
+// ─── Cart Pane ─────────────────────────────────────────────
+
 @Composable
 fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> Unit) {
     val cart by vm.cart.collectAsState()
@@ -654,19 +967,19 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
     var noteFor by remember { mutableStateOf<CartLine?>(null) }
 
     Column(modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant)) {
-        // Header
         Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
-                Text("Keranjang", style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold)
+                Text(
+                    "Keranjang",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
                 Text(
                     buildString {
                         append(if (vm.nomorMeja.isBlank()) "Tanpa meja" else "Meja ${vm.nomorMeja}")
-                        append(" • ")
-                        append(tipeOrderLabel(vm.tipeOrder))
+                        append(" • "); append(vm.tipeOrder.label)
                         if (vm.namaPelanggan.isNotBlank()) {
-                            append(" • ")
-                            append(vm.namaPelanggan)
+                            append(" • "); append(vm.namaPelanggan)
                         }
                     },
                     style = MaterialTheme.typography.bodySmall
@@ -676,20 +989,16 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
         HorizontalDivider()
 
         if (cart.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.ShoppingCart, null,
-                        modifier = Modifier.size(48.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Keranjang kosong",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            EmptyState(
+                "🛒", "Keranjang kosong", "Tambahkan menu dari daftar",
+                Modifier.weight(1f).fillMaxWidth()
+            )
         } else {
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(),
+            LazyColumn(
+                Modifier.weight(1f).fillMaxWidth(),
                 contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(cart, key = { it.key }) { line ->
                     CartLineItem(
                         line = line,
@@ -703,25 +1012,27 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
         }
 
         HorizontalDivider()
-        // Total + tombol
         Surface(color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
                 Row {
-                    Text("Total", Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleMedium)
-                    Text(total.rupiah(), fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleLarge, color = BRAND)
+                    Text("Total", Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        total.rupiah(),
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = BRAND
+                    )
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(
-                        onClick = { vm.simpanOpenBill { } },
-                        enabled = cart.isNotEmpty(),
+                        onClick = { vm.simpanOpenBill() },
+                        enabled = cart.isNotEmpty() && !vm.isSaving,
                         modifier = Modifier.weight(1f)
                     ) { Text("Open Bill") }
                     Button(
                         onClick = onBayar,
-                        enabled = cart.isNotEmpty(),
+                        enabled = cart.isNotEmpty() && !vm.isSaving,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = BRAND)
                     ) { Text("Bayar") }
@@ -736,10 +1047,7 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
             menuName = line.menu.nama,
             onDismiss = { noteFor = null },
             onSave = { newNote ->
-                vm.remove(line.key)
-                vm.add(line.menu, newNote)
-                // set qty
-                repeat(line.qty - 1) { vm.add(line.menu, newNote) }
+                vm.updateNote(line.key, newNote.trim())
                 noteFor = null
             }
         )
@@ -770,29 +1078,22 @@ private fun CartLineItem(
             }
             if (line.catatan.isNotBlank()) {
                 Spacer(Modifier.height(4.dp))
-                Surface(
-                    color = BRAND_LIGHT,
-                    shape = RoundedCornerShape(6.dp)
-                ) {
-                    Text("📝 ${line.catatan}",
+                Surface(color = BRAND_LIGHT, shape = RoundedCornerShape(6.dp)) {
+                    Text(
+                        "📝 ${line.catatan}",
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.bodySmall)
+                        style = MaterialTheme.typography.bodySmall
+                    )
                 }
             }
             Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = onDecrease,
-                    modifier = Modifier.size(32.dp)
-                ) {
+                IconButton(onClick = onDecrease, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Remove, null, Modifier.size(18.dp))
                 }
                 Text(line.qty.toString(), fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 12.dp))
-                IconButton(
-                    onClick = onAdd,
-                    modifier = Modifier.size(32.dp)
-                ) {
+                IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
                     Icon(Icons.Default.Add, null, Modifier.size(18.dp))
                 }
                 Spacer(Modifier.weight(1f))
@@ -816,6 +1117,9 @@ private fun NoteDialog(
     onSave: (String) -> Unit
 ) {
     var text by remember { mutableStateOf(initial) }
+    val presets = remember {
+        listOf("Pedas", "Tanpa bawang", "Extra nasi", "Tanpa sambal", "Goreng kering")
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Catatan untuk $menuName") },
@@ -831,24 +1135,22 @@ private fun NoteDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(listOf("Pedas", "Tanpa bawang", "Extra nasi", "Tanpa sambal", "Goreng kering")) { t ->
-                        AssistChip(onClick = {
-                            text = if (text.isBlank()) t else "$text, $t"
-                        }, label = { Text(t, style = MaterialTheme.typography.bodySmall) })
+                    items(presets) { t ->
+                        AssistChip(
+                            onClick = { text = if (text.isBlank()) t else "$text, $t" },
+                            label = { Text(t, style = MaterialTheme.typography.bodySmall) }
+                        )
                     }
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = { onSave(text.trim()) }) { Text("Simpan") }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal") }
-        }
+        confirmButton = { TextButton(onClick = { onSave(text.trim()) }) { Text("Simpan") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } }
     )
 }
 
-// ---------- KERANJANG MOBILE ----------
+// ─── Keranjang Mobile ──────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KeranjangScreen(vm: KasirViewModel, onBack: () -> Unit, onBayar: () -> Unit) {
@@ -862,22 +1164,21 @@ fun KeranjangScreen(vm: KasirViewModel, onBack: () -> Unit, onBayar: () -> Unit)
             )
         }
     ) { pad ->
-        Box(Modifier.padding(pad).fillMaxSize()) {
-            CartPane(vm, Modifier.fillMaxSize(), onBayar)
-        }
+        CartPane(vm, Modifier.padding(pad).fillMaxSize(), onBayar)
     }
 }
 
-// ---------- BAYAR ----------
+// ─── Bayar ─────────────────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
     val total by vm.total.collectAsState()
-    var metode by remember { mutableStateOf("CASH") }
+    var metode by remember { mutableStateOf(MetodeBayar.CASH) }
     var dibayarText by remember { mutableStateOf("") }
-    val dibayar = dibayarText.toIntOrNull() ?: 0
+    val dibayar = dibayarText.toRupiahOrNull() ?: 0
     val kembalian = (dibayar - total).coerceAtLeast(0)
-    val cukup = if (metode == "CASH") dibayar >= total else true
+    val cukup = if (metode == MetodeBayar.CASH) dibayar >= total else true
 
     Scaffold(
         topBar = {
@@ -895,9 +1196,14 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
         ) {
             Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                 Column(Modifier.padding(16.dp)) {
-                    Text("Total tagihan", style = MaterialTheme.typography.bodyMedium)
-                    Text(total.rupiah(), style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold, color = BRAND)
+                    Text("Total tagihan", style = MaterialTheme.typography.bodyMedium,
+                        color = BRAND_DARK)
+                    Text(
+                        total.rupiah(),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = BRAND_DARK
+                    )
                     if (vm.nomorMeja.isNotBlank() || vm.namaPelanggan.isNotBlank()) {
                         Spacer(Modifier.height(6.dp))
                         Text(
@@ -908,7 +1214,8 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
                                     append(vm.namaPelanggan)
                                 }
                             },
-                            style = MaterialTheme.typography.bodySmall
+                            style = MaterialTheme.typography.bodySmall,
+                            color = BRAND_DARK
                         )
                     }
                 }
@@ -916,19 +1223,24 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
 
             Text("Metode bayar", fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("CASH", "QRIS", "DEBIT").forEach { m ->
-                    FilterChip(selected = metode == m, onClick = { metode = m },
-                        label = { Text(m) })
+                MetodeBayar.entries.forEach { m ->
+                    FilterChip(
+                        selected = metode == m,
+                        onClick = { metode = m },
+                        label = { Text(m.label) }
+                    )
                 }
             }
 
-            if (metode == "CASH") {
+            if (metode == MetodeBayar.CASH) {
                 OutlinedTextField(
                     value = dibayarText,
                     onValueChange = { dibayarText = it.filter { c -> c.isDigit() } },
                     label = { Text("Uang diterima") },
+                    prefix = { Text("Rp ") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true
                 )
                 QuickCash(total) { dibayarText = it.toString() }
                 Row {
@@ -940,12 +1252,24 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
             Spacer(Modifier.weight(1f))
             Button(
                 onClick = {
-                    vm.checkout(metode, if (metode == "CASH") dibayar else total) { onSelesai() }
+                    vm.checkout(metode, if (metode == MetodeBayar.CASH) dibayar else total) {
+                        onSelesai()
+                    }
                 },
-                enabled = cukup,
+                enabled = cukup && !vm.isSaving,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = BRAND)
-            ) { Text("Konfirmasi Bayar", fontWeight = FontWeight.Bold) }
+            ) {
+                if (vm.isSaving) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                }
+                Text("Konfirmasi Bayar", fontWeight = FontWeight.Bold)
+            }
         }
     }
 }
@@ -953,65 +1277,65 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
 @Composable
 private fun QuickCash(total: Int, onPick: (Int) -> Unit) {
     val suggestions = remember(total) {
-        val rounded = ((total + 4999) / 5000) * 5000
-        listOf(total, rounded, 50000, 100000).distinct().filter { it >= total }
+        val rounded5k = ((total + 4_999) / 5_000) * 5_000
+        val rounded10k = ((total + 9_999) / 10_000) * 10_000
+        listOf(total, rounded5k, rounded10k, 50_000, 100_000, 200_000)
+            .distinct()
+            .filter { it >= total }
+            .take(4)
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        suggestions.take(4).forEach { s ->
+        suggestions.forEach { s ->
             AssistChip(onClick = { onPick(s) }, label = { Text(s.rupiah()) })
         }
     }
 }
 
-// ---------- OPEN BILL ----------
+// ─── Open Bill ─────────────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
     val bills by vm.openBills.collectAsState()
     Scaffold(topBar = { TopAppBar(title = { Text("Open Bill") }) }) { pad ->
         if (bills.isEmpty()) {
-            Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.ReceiptLong, null,
-                        modifier = Modifier.size(56.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    Text("Belum ada open bill")
-                }
-            }
+            EmptyState(
+                "📋", "Belum ada open bill", "Bill yang disimpan akan muncul di sini",
+                Modifier.padding(pad).fillMaxSize()
+            )
         } else {
-            LazyColumn(Modifier.padding(pad).fillMaxSize(),
+            LazyColumn(
+                Modifier.padding(pad).fillMaxSize(),
                 contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(bills, key = { it.id }) { o ->
-                    Card(
-                        Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(10.dp)
-                    ) {
-                        Row(Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
+                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
+                        Row(
+                            Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
-                                    buildString {
-                                        if (o.nomorMeja.isNotBlank()) append("Meja ${o.nomorMeja}")
-                                        else append("Tanpa meja")
-                                    },
+                                    if (o.nomorMeja.isNotBlank()) "Meja ${o.nomorMeja}"
+                                    else "Tanpa meja",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleMedium
                                 )
                                 Text(
                                     buildString {
-                                        append(tipeOrderLabel(o.tipeOrder))
+                                        append(TipeOrder.fromKey(o.tipeOrder).label)
                                         if (o.namaPelanggan.isNotBlank()) {
-                                            append(" • ")
-                                            append(o.namaPelanggan)
+                                            append(" • "); append(o.namaPelanggan)
                                         }
                                     },
                                     style = MaterialTheme.typography.bodySmall
                                 )
-                                Text(o.timestamp.tanggal(),
+                                Text(
+                                    o.timestamp.tanggal(),
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                             Column(horizontalAlignment = Alignment.End) {
                                 Text(o.total.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
@@ -1030,11 +1354,14 @@ fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
     }
 }
 
-// ---------- KELOLA MENU ----------
+// ─── Kelola Menu ───────────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
     val menu by vm.menu.collectAsState()
+    var toDelete by remember { mutableStateOf<MenuItem?>(null) }
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Kelola Menu") }) },
         floatingActionButton = {
@@ -1047,9 +1374,10 @@ fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
         }
     ) { pad ->
         if (menu.isEmpty()) {
-            Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Belum ada menu")
-            }
+            EmptyState(
+                "🍽️", "Belum ada menu", "Tekan tombol + untuk menambahkan",
+                Modifier.padding(pad).fillMaxSize()
+            )
         } else {
             LazyColumn(
                 Modifier.padding(pad).fillMaxSize(),
@@ -1061,36 +1389,54 @@ fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
                         m = m,
                         onToggle = { vm.toggle(m) },
                         onEdit = { onEdit(m.id) },
-                        onDelete = { vm.delete(m) }
+                        onDelete = { toDelete = m }
                     )
                 }
             }
         }
     }
+
+    toDelete?.let { m ->
+        AlertDialog(
+            onDismissRequest = { toDelete = null },
+            title = { Text("Hapus menu?") },
+            text = { Text("\"${m.nama}\" akan dihapus permanen.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    vm.delete(m)
+                    toDelete = null
+                }) { Text("Hapus", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { toDelete = null }) { Text("Batal") }
+            }
+        )
+    }
 }
 
 @Composable
-private fun MenuRow(m: MenuItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
+private fun MenuRow(
+    m: MenuItem,
+    onToggle: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            if (m.fotoUri != null) {
-                AsyncImage(
-                    model = File(m.fotoUri), contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp))
-                )
-            } else {
-                Box(Modifier.size(56.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center) { Text("🍽️") }
-            }
+            MenuImage(
+                path = m.fotoUri,
+                contentDescription = m.nama,
+                modifier = Modifier.size(56.dp).clip(RoundedCornerShape(8.dp))
+            )
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(m.nama, fontWeight = FontWeight.SemiBold)
                 Text(m.harga.rupiah(), color = BRAND)
-                Text(m.kategori, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    m.kategori,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
             Switch(checked = m.tersedia, onCheckedChange = { onToggle() })
             IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, null) }
@@ -1103,31 +1449,45 @@ private fun MenuRow(m: MenuItem, onToggle: () -> Unit, onEdit: () -> Unit, onDel
 @Composable
 fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     val ctx = LocalContext.current
+
     var nama by remember { mutableStateOf("") }
     var hargaText by remember { mutableStateOf("") }
     var kategori by remember { mutableStateOf("Umum") }
-    var fotoUri by remember { mutableStateOf<String?>(null) }
+    // Path file lokal (absolute path), hasil dari copy
+    var fotoPath by remember { mutableStateOf<String?>(null) }
+    // Path gambar lama (untuk dihapus kalau diganti)
+    var oldFotoPath by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
     var loaded by remember { mutableStateOf(menuId == null) }
+    var isSaving by remember { mutableStateOf(false) }
 
     LaunchedEffect(menuId) {
         if (menuId != null) {
             vm.get(menuId)?.let {
-                nama = it.nama; hargaText = it.harga.toString()
-                kategori = it.kategori; fotoUri = it.fotoUri; tersedia = it.tersedia
+                nama = it.nama
+                hargaText = it.harga.toString()
+                kategori = it.kategori
+                fotoPath = it.fotoUri
+                oldFotoPath = it.fotoUri
+                tersedia = it.tersedia
             }
             loaded = true
         }
     }
 
+    // Picker: ambil dari galeri → copy ke internal → dapat path lokal
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
-    ) { uri ->
-        if (uri != null) {
-            ctx.contentResolver.takePersistableUriPermission(
-                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-            )
-            fotoUri = uri.toString()
+    ) { uri: Uri? ->
+        uri ?: return@rememberLauncherForActivityResult
+        val newPath = MenuImageStore.copyFromUri(ctx, uri)
+        if (newPath != null) {
+            // Kalau user ganti foto berulang sebelum save, hapus temp yang tadi
+            // (foto lama tetap disimpan buat dibersihin pas save)
+            if (fotoPath != null && fotoPath != oldFotoPath) {
+                MenuImageStore.delete(fotoPath)
+            }
+            fotoPath = newPath
         }
     }
 
@@ -1146,35 +1506,67 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 CircularProgressIndicator()
             }
         } else {
+            val harga = hargaText.toRupiahOrNull() ?: 0
+            val canSave = nama.isNotBlank() && harga > 0 && !isSaving
+
             Column(
                 Modifier.padding(pad).padding(16.dp).fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                fotoUri?.let {
-                    AsyncImage(
-                        model = File(it), contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().height(180.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                // Preview foto
+                Box(
+                    Modifier.fillMaxWidth().height(200.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                ) {
+                    MenuImage(
+                        path = fotoPath,
+                        contentDescription = "Preview",
+                        modifier = Modifier.fillMaxSize()
                     )
                 }
-                OutlinedButton(onClick = { picker.launch(arrayOf("image/*")) },
-                    modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Photo, null)
-                    Spacer(Modifier.width(8.dp))
-                    Text(if (fotoUri == null) "Pilih Foto dari Galeri" else "Ganti Foto")
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(
+                        onClick = { picker.launch(arrayOf("image/*")) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Photo, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (fotoPath == null) "Pilih Foto" else "Ganti Foto")
+                    }
+                    if (fotoPath != null) {
+                        OutlinedButton(
+                            onClick = {
+                                // Hapus file yang barusan di-copy (belum di-save)
+                                if (fotoPath != oldFotoPath) {
+                                    MenuImageStore.delete(fotoPath)
+                                }
+                                fotoPath = null
+                            }
+                        ) {
+                            Icon(Icons.Default.Delete, null)
+                        }
+                    }
                 }
-                OutlinedTextField(value = nama, onValueChange = { nama = it },
-                    label = { Text("Nama menu") }, modifier = Modifier.fillMaxWidth(),
-                    singleLine = true)
-                OutlinedTextField(value = hargaText,
+
+                OutlinedTextField(
+                    value = nama, onValueChange = { nama = it },
+                    label = { Text("Nama menu") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                OutlinedTextField(
+                    value = hargaText,
                     onValueChange = { hargaText = it.filter { c -> c.isDigit() } },
                     label = { Text("Harga") },
+                    prefix = { Text("Rp ") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(value = kategori, onValueChange = { kategori = it },
-                    label = { Text("Kategori") }, modifier = Modifier.fillMaxWidth(),
-                    singleLine = true)
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
+                OutlinedTextField(
+                    value = kategori, onValueChange = { kategori = it },
+                    label = { Text("Kategori") },
+                    modifier = Modifier.fillMaxWidth(), singleLine = true
+                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Tersedia", Modifier.weight(1f))
                     Switch(checked = tersedia, onCheckedChange = { tersedia = it })
@@ -1182,47 +1574,71 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 Button(
                     onClick = {
-                        val harga = hargaText.toIntOrNull() ?: 0
-                        if (nama.isBlank() || harga <= 0) return@Button
+                        if (!canSave) return@Button
+                        isSaving = true
                         vm.save(
-                            MenuItem(
+                            item = MenuItem(
                                 id = menuId ?: 0,
-                                nama = nama.trim(), harga = harga,
+                                nama = nama.trim(),
+                                harga = harga,
                                 kategori = kategori.trim().ifBlank { "Umum" },
-                                fotoUri = fotoUri, tersedia = tersedia
-                            )
-                        ) { onBack() }
+                                fotoUri = fotoPath,
+                                tersedia = tersedia
+                            ),
+                            oldImagePath = oldFotoPath
+                        ) {
+                            isSaving = false
+                            onBack()
+                        }
                     },
+                    enabled = canSave,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = BRAND)
-                ) { Text("Simpan") }
+                ) {
+                    if (isSaving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            color = Color.White,
+                            strokeWidth = 2.dp
+                        )
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text("Simpan")
+                }
             }
         }
     }
 }
 
-// ---------- RIWAYAT ----------
+// ─── Riwayat ───────────────────────────────────────────────
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RiwayatScreen(vm: RiwayatViewModel) {
     val orders by vm.orders.collectAsState()
     Scaffold(topBar = { TopAppBar(title = { Text("Riwayat Transaksi") }) }) { pad ->
         if (orders.isEmpty()) {
-            Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Belum ada transaksi")
-            }
+            EmptyState(
+                "🧾", "Belum ada transaksi", "Transaksi yang sudah dibayar muncul di sini",
+                Modifier.padding(pad).fillMaxSize()
+            )
         } else {
-            LazyColumn(Modifier.padding(pad).fillMaxSize(),
+            LazyColumn(
+                Modifier.padding(pad).fillMaxSize(),
                 contentPadding = PaddingValues(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 items(orders, key = { it.id }) { o ->
                     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
-                        Row(Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
+                        Row(
+                            Modifier.padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
                             Column(Modifier.weight(1f)) {
                                 Text(
                                     buildString {
-                                        if (o.nomorMeja.isNotBlank()) append("Meja ${o.nomorMeja} • ")
+                                        if (o.nomorMeja.isNotBlank())
+                                            append("Meja ${o.nomorMeja} • ")
                                         append(o.metodeBayar)
                                     },
                                     fontWeight = FontWeight.SemiBold
@@ -1231,8 +1647,7 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
                                     buildString {
                                         append(o.timestamp.tanggal())
                                         if (o.namaPelanggan.isNotBlank()) {
-                                            append(" • ")
-                                            append(o.namaPelanggan)
+                                            append(" • "); append(o.namaPelanggan)
                                         }
                                     },
                                     style = MaterialTheme.typography.bodySmall,
@@ -1249,8 +1664,9 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// APPLICATION + ACTIVITY + NAVIGATION
+// APP + ACTIVITY + NAVIGATION
 // ═══════════════════════════════════════════════════════════
+
 class KasirApp : Application() {
     val repository: PosRepository by lazy {
         val db = AppDatabase.get(this)
@@ -1263,43 +1679,79 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val repo = (application as KasirApp).repository
         setContent {
-            MaterialTheme(
-                colorScheme = lightColorScheme(
-                    primary = BRAND,
-                    onPrimary = Color.White
-                )
-            ) { AppRoot(repo) }
+            val dark = isSystemInDarkTheme()
+            val colors = if (dark) darkColorScheme(
+                primary = BRAND,
+                onPrimary = Color.White,
+                secondaryContainer = BRAND_DARK
+            ) else lightColorScheme(
+                primary = BRAND,
+                onPrimary = Color.White,
+                secondaryContainer = BRAND_LIGHT
+            )
+            MaterialTheme(colorScheme = colors) {
+                AppRoot(repo)
+            }
         }
     }
 }
 
-private data class Tab(val route: String, val label: String, val icon: ImageVector)
+sealed class Route(val path: String) {
+    data object Kasir : Route("kasir")
+    data object Keranjang : Route("keranjang")
+    data object Bayar : Route("bayar")
+    data object OpenBill : Route("openbill")
+    data object Menu : Route("menu")
+    data object MenuEdit : Route("menu/edit?menuId={menuId}") {
+        fun build(menuId: Long?): String = "menu/edit?menuId=${menuId ?: -1L}"
+    }
+    data object Riwayat : Route("riwayat")
+
+    companion object {
+        const val ARG_MENU_ID = "menuId"
+    }
+}
+
+private data class Tab(val route: Route, val label: String, val icon: ImageVector)
 
 @Composable
 fun AppRoot(repo: PosRepository) {
     val nav = rememberNavController()
     val factory = remember(repo) { VMFactory(repo) }
     val kasirVm: KasirViewModel = viewModel(factory = factory)
+    val snackbarHost = remember { SnackbarHostState() }
 
-    val tabs = listOf(
-        Tab("kasir", "Kasir", Icons.Default.Home),
-        Tab("openbill", "Open Bill", Icons.Default.ReceiptLong),
-        Tab("menu", "Menu", Icons.Default.Restaurant),
-        Tab("riwayat", "Riwayat", Icons.Default.List),
-    )
+    LaunchedEffect(Unit) {
+        kasirVm.events.collect { e ->
+            when (e) {
+                is UiEvent.ShowMessage -> snackbarHost.showSnackbar(e.text)
+            }
+        }
+    }
+
+    val tabs = remember {
+        listOf(
+            Tab(Route.Kasir, "Kasir", Icons.Default.Home),
+            Tab(Route.OpenBill, "Open Bill", Icons.Default.ReceiptLong),
+            Tab(Route.Menu, "Menu", Icons.Default.Restaurant),
+            Tab(Route.Riwayat, "Riwayat", Icons.Default.List),
+        )
+    }
     val current by nav.currentBackStackEntryAsState()
     val currentRoute = current?.destination?.route
-    val showBar = tabs.any { it.route == currentRoute }
+    val showBar = tabs.any { it.route.path == currentRoute }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         bottomBar = {
             if (showBar) {
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
                     tabs.forEach { t ->
+                        val selected = currentRoute?.startsWith(t.route.path) == true
                         NavigationBarItem(
-                            selected = currentRoute == t.route,
+                            selected = selected,
                             onClick = {
-                                nav.navigate(t.route) {
+                                nav.navigate(t.route.path) {
                                     popUpTo(nav.graph.startDestinationId) { saveState = true }
                                     launchSingleTop = true
                                     restoreState = true
@@ -1310,7 +1762,7 @@ fun AppRoot(repo: PosRepository) {
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = BRAND,
                                 selectedTextColor = BRAND,
-                                indicatorColor = BRAND_LIGHT
+                                indicatorColor = MaterialTheme.colorScheme.secondaryContainer
                             )
                         )
                     }
@@ -1318,56 +1770,60 @@ fun AppRoot(repo: PosRepository) {
             }
         }
     ) { pad ->
-        NavHost(navController = nav, startDestination = "kasir",
-            modifier = Modifier.padding(pad)) {
-
-            composable("kasir") {
+        NavHost(
+            navController = nav,
+            startDestination = Route.Kasir.path,
+            modifier = Modifier.padding(pad)
+        ) {
+            composable(Route.Kasir.path) {
                 KasirScreen(
                     vm = kasirVm,
-                    onOpenKeranjang = { nav.navigate("keranjang") },
-                    onBayar = { nav.navigate("bayar") }
+                    onOpenKeranjang = { nav.navigate(Route.Keranjang.path) },
+                    onBayar = { nav.navigate(Route.Bayar.path) }
                 )
             }
-            composable("keranjang") {
+            composable(Route.Keranjang.path) {
                 KeranjangScreen(
                     vm = kasirVm,
                     onBack = { nav.popBackStack() },
-                    onBayar = { nav.navigate("bayar") }
+                    onBayar = { nav.navigate(Route.Bayar.path) }
                 )
             }
-            composable("bayar") {
+            composable(Route.Bayar.path) {
                 BayarScreen(
                     vm = kasirVm,
                     onBack = { nav.popBackStack() },
-                    onSelesai = { nav.popBackStack("kasir", inclusive = false) }
+                    onSelesai = { nav.popBackStack(Route.Kasir.path, inclusive = false) }
                 )
             }
-            composable("openbill") {
+            composable(Route.OpenBill.path) {
                 val vm: OpenBillViewModel = viewModel(factory = factory)
                 OpenBillScreen(vm) { orderId ->
-                    kasirVm.loadOpenBill(orderId)
-                    nav.navigate("kasir") {
-                        popUpTo("openbill") { inclusive = true }
+                    kasirVm.loadOpenBill(orderId) {
+                        nav.navigate(Route.Bayar.path) {
+                            popUpTo(Route.Kasir.path) { inclusive = false }
+                        }
                     }
-                    nav.navigate("bayar")
                 }
             }
-            composable("menu") {
+            composable(Route.Menu.path) {
                 val vm: MenuViewModel = viewModel(factory = factory)
-                MenuScreen(vm) { id ->
-                    nav.navigate(if (id == null) "menu/edit" else "menu/edit/$id")
-                }
+                MenuScreen(vm) { id -> nav.navigate(Route.MenuEdit.build(id)) }
             }
-            composable("menu/edit") {
+            composable(
+                route = Route.MenuEdit.path,
+                arguments = listOf(
+                    navArgument(Route.ARG_MENU_ID) {
+                        type = NavType.LongType
+                        defaultValue = -1L
+                    }
+                )
+            ) { entry ->
                 val vm: MenuViewModel = viewModel(factory = factory)
-                EditMenuScreen(vm, menuId = null, onBack = { nav.popBackStack() })
-            }
-            composable("menu/edit/{id}") { entry ->
-                val vm: MenuViewModel = viewModel(factory = factory)
-                val id = entry.arguments?.getString("id")?.toLongOrNull()
+                val id = entry.arguments?.getLong(Route.ARG_MENU_ID)?.takeIf { it >= 0 }
                 EditMenuScreen(vm, menuId = id, onBack = { nav.popBackStack() })
             }
-            composable("riwayat") {
+            composable(Route.Riwayat.path) {
                 val vm: RiwayatViewModel = viewModel(factory = factory)
                 RiwayatScreen(vm)
             }
