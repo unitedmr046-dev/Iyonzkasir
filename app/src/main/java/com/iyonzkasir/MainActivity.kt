@@ -108,10 +108,6 @@ object MenuImageStore {
     private fun dir(context: Context): File =
         File(context.filesDir, DIR_NAME).apply { mkdirs() }
 
-    /**
-     * Copy content Uri (dari galeri) ke internal storage app.
-     * Return absolute path file lokal, atau null kalau gagal.
-     */
     fun copyFromUri(context: Context, uri: Uri): String? = runCatching {
         val target = File(dir(context), "menu_${System.currentTimeMillis()}.jpg")
         context.contentResolver.openInputStream(uri)?.use { input ->
@@ -120,10 +116,6 @@ object MenuImageStore {
         if (target.length() > 0) target.absolutePath else null
     }.getOrNull()
 
-    /**
-     * Hapus file gambar lokal. Return true kalau file ada & terhapus.
-     * Aman dipanggil berkali-kali.
-     */
     fun delete(path: String?): Boolean {
         if (path.isNullOrBlank()) return false
         return runCatching {
@@ -132,7 +124,6 @@ object MenuImageStore {
         }.getOrDefault(false)
     }
 
-    /** Cek file masih ada (buat fallback UI). */
     fun exists(path: String?): Boolean =
         !path.isNullOrBlank() && File(path).exists()
 }
@@ -150,7 +141,7 @@ data class MenuItem(
     val nama: String,
     val harga: Int,
     val kategori: String = "Umum",
-    val fotoUri: String? = null, // sekarang: absolute path file lokal
+    val fotoUri: String? = null,
     val tersedia: Boolean = true
 )
 
@@ -386,9 +377,19 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
     var isSaving by mutableStateOf(false)
         private set
 
-    fun setNomorMeja(v: String) { nomorMeja = v.filter { it.isDigit() } }
-    fun setTipeOrder(t: TipeOrder) { tipeOrder = t }
-    fun setNamaPelanggan(v: String) { namaPelanggan = v }
+    // ── Renamed: updateXxx (biar gak clash sama setter otomatis property) ──
+
+    fun updateNomorMeja(v: String) {
+        nomorMeja = v.filter { it.isDigit() }
+    }
+
+    fun updateTipeOrder(t: TipeOrder) {
+        tipeOrder = t
+    }
+
+    fun updateNamaPelanggan(v: String) {
+        namaPelanggan = v
+    }
 
     fun add(menu: MenuItem, catatan: String = "") {
         val key = cartKey(menu.id, catatan)
@@ -550,7 +551,7 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
     private fun cartKey(menuId: Long, catatan: String) = "$menuId|$catatan"
 }
 
-// ─── MenuViewModel (dengan image lifecycle) ────────────────
+// ─── MenuViewModel ─────────────────────────────────────────
 
 class MenuViewModel(private val repo: PosRepository) : ViewModel() {
 
@@ -560,10 +561,6 @@ class MenuViewModel(private val repo: PosRepository) : ViewModel() {
     private val _events = Channel<UiEvent>(Channel.BUFFERED)
     val events: Flow<UiEvent> = _events.receiveAsFlow()
 
-    /**
-     * Simpan menu. Kalau oldImagePath != newImagePath (dan oldImagePath != null),
-     * hapus file gambar lama biar gak numpuk di storage.
-     */
     fun save(
         item: MenuItem,
         oldImagePath: String? = null,
@@ -571,7 +568,6 @@ class MenuViewModel(private val repo: PosRepository) : ViewModel() {
     ) = viewModelScope.launch {
         when (val result = repo.upsertMenu(item)) {
             is DataResult.Success -> {
-                // Hapus file gambar lama kalau beda dari yang baru
                 if (!oldImagePath.isNullOrBlank() && oldImagePath != item.fotoUri) {
                     MenuImageStore.delete(oldImagePath)
                 }
@@ -584,7 +580,6 @@ class MenuViewModel(private val repo: PosRepository) : ViewModel() {
     fun delete(item: MenuItem) = viewModelScope.launch {
         when (val result = repo.deleteMenu(item)) {
             is DataResult.Success -> {
-                // Hapus file gambar dari storage juga
                 MenuImageStore.delete(item.fotoUri)
                 _events.send(UiEvent.ShowMessage("${item.nama} dihapus"))
             }
@@ -628,12 +623,6 @@ class VMFactory(private val repo: PosRepository) : ViewModelProvider.Factory {
 // REUSABLE COMPONENTS
 // ═══════════════════════════════════════════════════════════
 
-/**
- * Wrapper AsyncImage yang bener:
- * - Menerima path file lokal ATAU URL/content URI
- * - Placeholder + error state (biar gak blank)
- * - Crossfade biar smooth
- */
 @Composable
 fun MenuImage(
     path: String?,
@@ -647,7 +636,7 @@ fun MenuImage(
     if (hasImage && path != null) {
         AsyncImage(
             model = ImageRequest.Builder(ctx)
-                .data(File(path))    // file lokal (absolute path)
+                .data(File(path))
                 .crossfade(true)
                 .build(),
             contentDescription = contentDescription,
@@ -655,7 +644,6 @@ fun MenuImage(
             modifier = modifier
         )
     } else {
-        // Fallback emoji kalau gak ada gambar
         Box(
             modifier.background(MaterialTheme.colorScheme.surfaceVariant),
             contentAlignment = Alignment.Center
@@ -874,7 +862,7 @@ private fun OrderMetaBar(vm: KasirViewModel) {
         TipeOrder.entries.forEach { t ->
             FilterChip(
                 selected = vm.tipeOrder == t,
-                onClick = { vm.setTipeOrder(t) },
+                onClick = { vm.updateTipeOrder(t) },
                 label = { Text(t.label, style = MaterialTheme.typography.bodySmall) }
             )
         }
@@ -907,8 +895,8 @@ private fun OrderMetaBar(vm: KasirViewModel) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    vm.setNomorMeja(tempMeja)
-                    vm.setNamaPelanggan(tempNama)
+                    vm.updateNomorMeja(tempMeja)
+                    vm.updateNamaPelanggan(tempNama)
                     showDialog = false
                 }) { Text("Simpan") }
             },
@@ -1453,9 +1441,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     var nama by remember { mutableStateOf("") }
     var hargaText by remember { mutableStateOf("") }
     var kategori by remember { mutableStateOf("Umum") }
-    // Path file lokal (absolute path), hasil dari copy
     var fotoPath by remember { mutableStateOf<String?>(null) }
-    // Path gambar lama (untuk dihapus kalau diganti)
     var oldFotoPath by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
     var loaded by remember { mutableStateOf(menuId == null) }
@@ -1475,15 +1461,12 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
         }
     }
 
-    // Picker: ambil dari galeri → copy ke internal → dapat path lokal
     val picker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
         uri ?: return@rememberLauncherForActivityResult
         val newPath = MenuImageStore.copyFromUri(ctx, uri)
         if (newPath != null) {
-            // Kalau user ganti foto berulang sebelum save, hapus temp yang tadi
-            // (foto lama tetap disimpan buat dibersihin pas save)
             if (fotoPath != null && fotoPath != oldFotoPath) {
                 MenuImageStore.delete(fotoPath)
             }
@@ -1513,7 +1496,6 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 Modifier.padding(pad).padding(16.dp).fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Preview foto
                 Box(
                     Modifier.fillMaxWidth().height(200.dp)
                         .clip(RoundedCornerShape(12.dp))
@@ -1537,7 +1519,6 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     if (fotoPath != null) {
                         OutlinedButton(
                             onClick = {
-                                // Hapus file yang barusan di-copy (belum di-save)
                                 if (fotoPath != oldFotoPath) {
                                     MenuImageStore.delete(fotoPath)
                                 }
