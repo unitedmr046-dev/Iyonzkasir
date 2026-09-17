@@ -6,11 +6,11 @@ plugins {
 }
 
 android {
-    namespace = "com.rumahmakan.kasir"
+    namespace = "com.iyonzkasir"
     compileSdk = 34
 
     defaultConfig {
-        applicationId = "com.rumahmakan.kasir"
+        applicationId = "com.iyonzkasir"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
