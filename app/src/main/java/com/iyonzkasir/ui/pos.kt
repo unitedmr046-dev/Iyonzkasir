@@ -1049,8 +1049,10 @@ fun DashboardScreen(vm: DashboardViewModel) {
             Text("Hari Ini", style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold)
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatCard("Transaksi", trx.toString(), Icons.Default.Receipt, Modifier.weight(1f))
-                StatCard("Omzet", omzet.rupiah(), Icons.Default.AttachMoney, Modifier.weight(1f))
+                StatCard("Transaksi", trx.toString(),
+                    Icons.Default.Receipt, Modifier.weight(1f))
+                StatCard("Omzet", omzet.rupiah(),
+                    Icons.Default.AttachMoney, Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Text("Transaksi Terakhir", fontWeight = FontWeight.SemiBold)
@@ -1060,19 +1062,24 @@ fun DashboardScreen(vm: DashboardViewModel) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(recent.take(20), key = { it.id }) { o ->
+                    items(recent.take(20), key = { it.id }) { order ->
                         Card(Modifier.fillMaxWidth()) {
                             Row(Modifier.padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(o.jamPendek() + " • " + PaymentMethod.fromId(o.metodeBayar).label,
-                                        fontWeight = FontWeight.SemiBold)
                                     Text(
-                                        if (o.nomorMeja.isNotBlank()) "Meja ${o.nomorMeja}"
+                                        order.timestamp.jamPendek() + " • " +
+                                        PaymentMethod.fromId(order.metodeBayar).label,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Text(
+                                        if (order.nomorMeja.isNotBlank()) "Meja ${order.nomorMeja}"
                                         else "Tanpa meja",
-                                        style = MaterialTheme.typography.bodySmall)
+                                        style = MaterialTheme.typography.bodySmall
+                                    )
                                 }
-                                Text(o.total.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
+                                Text(order.total.rupiah(),
+                                    fontWeight = FontWeight.Bold, color = BRAND)
                             }
                         }
                     }
