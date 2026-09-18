@@ -1,6 +1,7 @@
 package com.iyonzkasir.ui
 
 import android.content.Intent
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -221,12 +222,19 @@ class PosVMFactory(private val repo: PosRepository) : ViewModelProvider.Factory 
 }
 
 // ═══════════════════════════════════════════════════════════
-// ROUTES
+// ROUTES — semua pakai Activity sebagai ViewModelStoreOwner
+// supaya 1 instance KasirViewModel dipakai bareng-bareng
 // ═══════════════════════════════════════════════════════════
+
+@Composable
+private fun activityOwner(): ComponentActivity =
+    LocalContext.current as ComponentActivity
+
 @Composable
 fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
     val factory = remember { PosVMFactory(app.posRepo) }
-    val vm: KasirViewModel = viewModel(factory = factory)
+    val owner = activityOwner()
+    val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     PosScreen(vm,
         onOpenKeranjang = { nav.navigate(Routes.KERANJANG) },
         onBayar = { nav.navigate(Routes.BAYAR) })
@@ -235,7 +243,8 @@ fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController)
 @Composable
 fun KeranjangRoute(app: IyonzApp, nav: NavHostController) {
     val factory = remember { PosVMFactory(app.posRepo) }
-    val vm: KasirViewModel = viewModel(factory = factory)
+    val owner = activityOwner()
+    val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     KeranjangScreen(vm,
         onBack = { nav.popBackStack() },
         onBayar = { nav.navigate(Routes.BAYAR) })
@@ -244,7 +253,8 @@ fun KeranjangRoute(app: IyonzApp, nav: NavHostController) {
 @Composable
 fun BayarRoute(app: IyonzApp, nav: NavHostController) {
     val factory = remember { PosVMFactory(app.posRepo) }
-    val vm: KasirViewModel = viewModel(factory = factory)
+    val owner = activityOwner()
+    val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     BayarScreen(vm,
         onBack = { nav.popBackStack() },
         onSelesai = { nav.popBackStack(Routes.MAIN, inclusive = false) })
@@ -254,7 +264,8 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
 fun OpenBillRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
     val factory = remember { PosVMFactory(app.posRepo) }
     val vm: OpenBillViewModel = viewModel(factory = factory)
-    val kasirVm: KasirViewModel = viewModel(factory = factory)
+    val owner = activityOwner()
+    val kasirVm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     OpenBillScreen(vm) { orderId ->
         kasirVm.loadOpenBill(orderId)
         nav.navigate(Routes.BAYAR)
