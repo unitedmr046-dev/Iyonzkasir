@@ -30,11 +30,10 @@ import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.iyonzkasir.*
 import com.iyonzkasir.data.*
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
-// SETTINGS MAIN SCREEN
+// SETTINGS MAIN
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -63,7 +62,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             Modifier.padding(pad).fillMaxSize(),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            // Header profil toko
+            // Header toko
             item {
                 Card(
                     Modifier.fillMaxWidth().padding(16.dp),
@@ -84,8 +83,10 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                             Text("${businessType.emoji} ${businessType.label}",
                                 style = MaterialTheme.typography.bodySmall)
                         }
-                        IconButton(onClick = { nav.navigate(Routes.PROFIL_TOKO) }) {
-                            Icon(Icons.Default.Edit, null, tint = BRAND)
+                        if (Session.can(PermissionKey.PROFIL_TOKO)) {
+                            IconButton(onClick = { nav.navigate(Routes.PROFIL_TOKO) }) {
+                                Icon(Icons.Default.Edit, null, tint = BRAND)
+                            }
                         }
                     }
                 }
@@ -131,83 +132,82 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Grup: Toko
+            // Toko
             item {
                 SectionHeader("Toko")
                 SettingsItem("Profil Toko", Icons.Default.Store,
                     subtitle = "Nama, alamat, telepon, footer struk") {
-                    nav.navigate(Routes.PROFIL_TOKO)
-                }
-                SettingsItem("Jenis Usaha", Icons.Default.Category,
-                    subtitle = businessType.label) {
-                    // Dialog pilih bisnis (implementasi di bawah)
+                    if (Session.can(PermissionKey.PROFIL_TOKO))
+                        nav.navigate(Routes.PROFIL_TOKO)
                 }
             }
 
-            // Grup: Fitur
+            // Tampilan
             item {
-                SectionHeader("Fitur Aplikasi")
-                SettingsItem("Kelola Fitur", Icons.Default.Tune,
-                    subtitle = "Aktifkan / matikan fitur sesuai kebutuhan") {
-                    nav.navigate(Routes.FEATURE_TOGGLE)
+                SectionHeader("Tampilan")
+                SettingsItem("Tema", Icons.Default.Palette,
+                    subtitle = "Terang / Gelap / Ikut Sistem") {
+                    nav.navigate(Routes.TEMA)
                 }
             }
 
-            // Grup: Pengguna
-            if (user?.role == UserRole.OWNER.id) {
+            // Fitur
+            if (Session.can(PermissionKey.KELOLA_FITUR)) {
+                item {
+                    SectionHeader("Fitur Aplikasi")
+                    SettingsItem("Kelola Fitur", Icons.Default.Tune,
+                        subtitle = "Aktifkan / matikan fitur sesuai kebutuhan") {
+                        nav.navigate(Routes.FEATURE_TOGGLE)
+                    }
+                }
+            }
+
+            // Pengguna
+            if (Session.can(PermissionKey.KELOLA_USER)) {
                 item {
                     SectionHeader("Pengguna & Keamanan")
                     SettingsItem("Kelola Pengguna", Icons.Default.People,
-                        subtitle = "Tambah, edit, nonaktifkan user") {
+                        subtitle = "Tambah user & atur izin") {
                         nav.navigate(Routes.KELOLA_USER)
                     }
-                    SettingsItem("Audit Log", Icons.Default.History,
-                        subtitle = "Riwayat aktivitas pengguna") {
-                        // TODO: AuditLog screen
-                    }
                 }
             }
 
-            // Grup: Hardware
-            item {
-                SectionHeader("Printer & Hardware")
-                SettingsItem("Printer Bluetooth", Icons.Default.Print,
-                    subtitle = "Cari & hubungkan printer struk") {
-                    // TODO
-                }
-                SettingsItem("Ukuran Struk", Icons.Default.Receipt,
-                    subtitle = "58mm / 80mm") {
-                    // TODO
+            // Hardware
+            if (Session.can(PermissionKey.BUKA_SETELAN)) {
+                item {
+                    SectionHeader("Printer & Hardware")
+                    SettingsItem("Printer Bluetooth", Icons.Default.Print,
+                        subtitle = "Segera hadir") { }
+                    SettingsItem("Ukuran Struk", Icons.Default.Receipt,
+                        subtitle = "58mm / 80mm (segera)") { }
                 }
             }
 
-            // Grup: Backup
-            item {
-                SectionHeader("Backup & Restore")
-                SettingsItem("Backup Manual", Icons.Default.CloudUpload,
-                    subtitle = "Simpan data ke storage") {
-                    // TODO
-                }
-                SettingsItem("Restore", Icons.Default.CloudDownload,
-                    subtitle = "Pulihkan dari file backup") {
-                    // TODO
+            // Backup
+            if (Session.can(PermissionKey.BACKUP_RESTORE)) {
+                item {
+                    SectionHeader("Backup & Restore")
+                    SettingsItem("Backup Manual", Icons.Default.CloudUpload,
+                        subtitle = "Segera hadir") { }
+                    SettingsItem("Restore", Icons.Default.CloudDownload,
+                        subtitle = "Segera hadir") { }
                 }
             }
 
-            // Grup: Tentang
+            // Tentang
             item {
                 SectionHeader("Tentang")
                 SettingsItem("Tentang Aplikasi", Icons.Default.Info,
-                    subtitle = "iyonzkasir v0.1.0") {
+                    subtitle = "iyonzkasir v0.2.0") {
                     nav.navigate(Routes.TENTANG)
                 }
             }
 
-            // Versi
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.1.0 • Made with ❤️",
+                    Text("iyonzkasir v0.2.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -255,7 +255,80 @@ private fun SettingsItem(
 }
 
 // ═══════════════════════════════════════════════════════════
-// FEATURE TOGGLE SCREEN
+// TEMA
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TemaRoute(app: IyonzApp, nav: NavHostController) {
+    val scope = rememberCoroutineScope()
+    var selected by remember { mutableStateOf(ThemeManager.mode) }
+
+    LaunchedEffect(Unit) {
+        selected = app.settingRepo.getThemeMode()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Tema") },
+                navigationIcon = {
+                    IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                }
+            )
+        }
+    ) { pad ->
+        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Pilih tampilan yang nyaman buat kamu",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(8.dp))
+
+            ThemeMode.values().forEach { mode ->
+                val isSelected = selected == mode
+                Card(
+                    Modifier.fillMaxWidth().clickable {
+                        selected = mode
+                        ThemeManager.update(mode)
+                        scope.launch { app.settingRepo.setThemeMode(mode) }
+                    },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) BRAND_LIGHT
+                        else MaterialTheme.colorScheme.surface
+                    )
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            when (mode) {
+                                ThemeMode.SYSTEM -> Icons.Default.SettingsBrightness
+                                ThemeMode.LIGHT -> Icons.Default.LightMode
+                                ThemeMode.DARK -> Icons.Default.DarkMode
+                            }, null, tint = BRAND
+                        )
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(mode.label, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                when (mode) {
+                                    ThemeMode.SYSTEM -> "Ikut pengaturan HP"
+                                    ThemeMode.LIGHT -> "Selalu terang"
+                                    ThemeMode.DARK -> "Selalu gelap"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        RadioButton(selected = isSelected, onClick = null)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// FEATURE TOGGLE
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -298,10 +371,15 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
         Column(Modifier.padding(pad).fillMaxSize()) {
             OutlinedTextField(
                 value = searchQuery, onValueChange = { searchQuery = it },
-                placeholder = { Text("Cari fitur...") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
+                placeholder = { Text("Cari fitur...",
+                    style = MaterialTheme.typography.bodySmall) },
+                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(12.dp)
+                textStyle = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                    .height(52.dp)
             )
 
             LazyColumn(
@@ -332,9 +410,7 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
                         )
                     }
                 }
-                item {
-                    Spacer(Modifier.height(24.dp))
-                }
+                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }
@@ -348,7 +424,11 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
                 TextButton(onClick = {
                     scope.launch {
                         val bt = app.settingRepo.getBusinessType()
-                        app.featureRepo.applyPreset(bt)
+                        if (bt == BusinessType.CUSTOM) {
+                            app.featureRepo.enableAll()
+                        } else {
+                            app.featureRepo.applyPreset(bt)
+                        }
                         showResetDialog = false
                     }
                 }) { Text("Reset") }
@@ -386,7 +466,7 @@ private fun FeatureToggleRow(
 }
 
 // ═══════════════════════════════════════════════════════════
-// PROFIL TOKO SCREEN
+// PROFIL TOKO
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -465,7 +545,6 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
                 Modifier.padding(pad).fillMaxSize().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Logo
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Box(
                         Modifier.size(100.dp).clip(CircleShape).background(BRAND_LIGHT)
@@ -568,12 +647,12 @@ fun TentangRoute(nav: NavHostController) {
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.1.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.2.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Text(
                 "Aplikasi kasir serbaguna untuk semua jenis usaha:\n" +
-                "warung, retail, cafe, restoran, laundry, dan jasa.\n\n" +
+                "warung, retail, cafe, restoran, laundry, toko bangunan, dan jasa.\n\n" +
                 "Offline by default, simple by default, aman by design.",
                 style = MaterialTheme.typography.bodyMedium,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
