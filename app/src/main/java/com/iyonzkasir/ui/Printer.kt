@@ -68,7 +68,7 @@ object ESC {
 }
 
 // ═══════════════════════════════════════════════════════════
-// PRINTER SERVICE — UNIVERSAL
+// PRINTER SERVICE
 // ═══════════════════════════════════════════════════════════
 object PrinterService {
     private var socket: BluetoothSocket? = null
@@ -82,7 +82,6 @@ object PrinterService {
 
     fun isConnected(): Boolean = socket?.isConnected == true
 
-    // UUID standar (untuk 90% printer thermal)
     private val STANDARD_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB")
     private val ALT_UUIDS = listOf(
         "00001101-0000-1000-8000-0002EE000002",
@@ -99,7 +98,8 @@ object PrinterService {
             lastStep = ""
 
             lastStep = "Cek Bluetooth"
-            val adapter = getAdapter(context) ?: run {
+            val adapter = getAdapter(context)
+            if (adapter == null) {
                 lastError = "Bluetooth tidak tersedia"
                 return@withContext false
             }
@@ -131,23 +131,24 @@ object PrinterService {
             try { adapter.cancelDiscovery() } catch (_: Exception) {}
             delay(500)
 
-            // ═══ STRATEGI 1: UUID standar SECURE (paling umum) ═══
+            // #1 Secure
             lastStep = "Connect #1 (secure)"
             var s = trySecure(device, STANDARD_UUID)
             if (s != null) return@withContext finalize(s, mac)
 
             delay(700)
+            // #2 Secure retry
             lastStep = "Connect #2 (secure retry)"
             s = trySecure(device, STANDARD_UUID)
             if (s != null) return@withContext finalize(s, mac)
 
-            // ═══ STRATEGI 2: UUID standar INSECURE ═══
             delay(700)
+            // #3 Insecure
             lastStep = "Connect #3 (insecure)"
             s = tryInsecure(device, STANDARD_UUID)
             if (s != null) return@withContext finalize(s, mac)
 
-            // ═══ STRATEGI 3: UUID alternatif ═══
+            // #4 Alternative UUIDs
             for ((i, u) in ALT_UUIDS.withIndex()) {
                 delay(500)
                 lastStep = "UUID alt #${i + 1}"
@@ -157,18 +158,18 @@ object PrinterService {
                 if (s != null) return@withContext finalize(s, mac)
             }
 
-            // ═══ STRATEGI 4: Reflection channel 1 ═══
             delay(500)
+            // #5 Reflection channel 1
             lastStep = "Reflection channel 1"
             s = tryReflection(device, 1)
             if (s != null) return@withContext finalize(s, mac)
 
-            lastError = "Semua metode gagal. Coba: matikan printer, tunggu 10 detik, nyalakan lagi."
-            false
+            lastError = "Semua metode gagal. Matikan printer 10 detik, nyalakan lagi."
+            return@withContext false
         } catch (e: Exception) {
             lastError = "Error: ${e.message ?: e.javaClass.simpleName}"
             disconnect()
-            false
+            return@withContext false
         }
     }
 
@@ -179,35 +180,53 @@ object PrinterService {
         delay(800)
         lastStep = "Selesai"
         lastError = null
-        true
+        return true
     }
 
-    private fun trySecure(device: BluetoothDevice, uuid: UUID): BluetoothSocket? =
-        try {
+    private fun trySecure(device: BluetoothDevice, uuid: UUID): BluetoothSocket? {
+        return try {
             val s = device.createRfcommSocketToServiceRecord(uuid)
             s.connect()
-            if (s.isConnected) s else { try { s.close() } catch (_: Exception) {}; null }
-        } catch (_: Exception) { null }
+            if (s.isConnected) s else {
+                try { s.close() } catch (_: Exception) {}
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
-    private fun tryInsecure(device: BluetoothDevice, uuid: UUID): BluetoothSocket? =
-        try {
+    private fun tryInsecure(device: BluetoothDevice, uuid: UUID): BluetoothSocket? {
+        return try {
             val m = device.javaClass.getMethod(
                 "createInsecureRfcommSocketToServiceRecord", UUID::class.java
             )
             val s = m.invoke(device, uuid) as BluetoothSocket
             s.connect()
-            if (s.isConnected) s else { try { s.close() } catch (_: Exception) {}; null }
-        } catch (_: Exception) { null }
+            if (s.isConnected) s else {
+                try { s.close() } catch (_: Exception) {}
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
-    private fun tryReflection(device: BluetoothDevice, channel: Int): BluetoothSocket? =
-        try {
+    private fun tryReflection(device: BluetoothDevice, channel: Int): BluetoothSocket? {
+        return try {
             val m: Method = device.javaClass.getMethod(
                 "createRfcommSocket", Int::class.javaPrimitiveType!!
             )
             val s = m.invoke(device, channel) as BluetoothSocket
             s.connect()
-            if (s.isConnected) s else { try { s.close() } catch (_: Exception) {}; null }
-        } catch (_: Exception) { null }
+            if (s.isConnected) s else {
+                try { s.close() } catch (_: Exception) {}
+                null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
 
     fun disconnect() {
         try { output?.close() } catch (_: Exception) {}
@@ -224,10 +243,10 @@ object PrinterService {
             output?.write(bytes)
             output?.flush()
             lastError = null
-            true
+            return@withContext true
         } catch (e: Exception) {
             lastError = "Kirim gagal: ${e.message}"
-            false
+            return@withContext false
         }
     }
 
@@ -291,9 +310,9 @@ class StrukBuilder(private val width: Int = 32) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// STRUK TEXT BUILDER (untuk preview & share WA)
+// STRUK TEXT BUILDER — SUSPEND (baca settings via repo)
 // ═══════════════════════════════════════════════════════════
-fun buildStrukText(
+suspend fun buildStrukText(
     settingRepo: SettingRepository,
     order: Order,
     items: List<OrderItem>
@@ -472,7 +491,7 @@ suspend fun cetakTest(settingRepo: SettingRepository): Boolean {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SHARE KE WHATSAPP / APLIKASI LAIN
+// SHARE
 // ═══════════════════════════════════════════════════════════
 fun shareStrukText(context: Context, strukText: String) {
     try {
@@ -497,7 +516,7 @@ fun shareKeWhatsApp(context: Context, noTelepon: String, strukText: String) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// PREVIEW STRUK DIALOG (untuk dipakai dari mana saja)
+// PREVIEW STRUK DIALOG
 // ═══════════════════════════════════════════════════════════
 @Composable
 fun StrukPreviewDialog(
@@ -522,8 +541,7 @@ fun StrukPreviewDialog(
                     colors = CardDefaults.cardColors(containerColor = Color.White)
                 ) {
                     Box(
-                        Modifier.fillMaxWidth()
-                            .padding(8.dp)
+                        Modifier.fillMaxWidth().padding(8.dp)
                             .horizontalScroll(rememberScrollState())
                     ) {
                         Text(
@@ -740,7 +758,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                         style = MaterialTheme.typography.labelSmall)
                     Text("2. Sudah di-pair di Setelan HP (PIN 0000/1234)",
                         style = MaterialTheme.typography.labelSmall)
-                    Text("3. Tidak terhubung ke HP/aplikasi lain",
+                    Text("3. Tidak terhubung ke HP/aplikasi lain (tutup RawBT dulu)",
                         style = MaterialTheme.typography.labelSmall)
                     Text("4. Kalau gagal → matikan printer 10 detik, nyalakan lagi",
                         style = MaterialTheme.typography.labelSmall)
