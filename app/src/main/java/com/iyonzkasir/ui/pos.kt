@@ -59,11 +59,28 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
     var searchQuery by mutableStateOf("")
     var kategoriFilter by mutableStateOf<String?>(null)
 
+    var diskonTipe by mutableStateOf("NONE")
+    var diskonValue by mutableStateOf(0)
+    var pajakPersen by mutableStateOf(0)
+
     private val _cart = MutableStateFlow<Map<String, CartLine>>(emptyMap())
     val cart: StateFlow<List<CartLine>> = _cart.map { it.values.toList() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-    val total: StateFlow<Int> = cart.map { it.sumOf { l -> l.subtotal } }
+
+    val subtotal: StateFlow<Int> = cart.map { it.sumOf { l -> l.subtotal } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    fun hitungDiskon(sub: Int): Int = when (diskonTipe) {
+        "NOMINAL" -> diskonValue.coerceIn(0, sub)
+        "PERSEN" -> sub * diskonValue.coerceIn(0, 100) / 100
+        else -> 0
+    }
+    fun hitungPajak(afterDiskon: Int): Int =
+        afterDiskon * pajakPersen.coerceIn(0, 100) / 100
+    fun hitungTotal(sub: Int): Int {
+        val d = hitungDiskon(sub); val a = sub - d
+        return a + hitungPajak(a)
+    }
 
     fun add(menu: MenuItem, catatan: String = "") {
         val key = "${menu.id}|$catatan"
@@ -82,7 +99,9 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
 
     fun resetOrder() {
         nomorMeja = ""; tipeOrder = TipeOrder.DINE_IN.id; namaPelanggan = ""
-        editingOrderId = null; clearCart()
+        editingOrderId = null
+        diskonTipe = "NONE"; diskonValue = 0; pajakPersen = 0
+        clearCart()
     }
 
     fun loadOpenBill(orderId: Long) {
@@ -93,6 +112,9 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
             tipeOrder = order.tipeOrder
             namaPelanggan = order.namaPelanggan
             editingOrderId = order.id
+            diskonTipe = order.diskonTipe
+            diskonValue = order.diskonValue
+            pajakPersen = order.pajakPersen
             _cart.value = items.associate { it ->
                 val key = "${it.menuId}|${it.catatan}"
                 val menuItem = repo.getMenu(it.menuId) ?: MenuItem(
@@ -107,26 +129,30 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
         val lines = cart.value
         if (lines.isEmpty()) return
         viewModelScope.launch {
-            val totalInt = lines.sumOf { it.subtotal }
+            val sub = lines.sumOf { it.subtotal }
+            val diskon = hitungDiskon(sub)
+            val pajak = hitungPajak(sub - diskon)
+            val totalInt = sub - diskon + pajak
             val items = lines.map {
                 OrderItem(0, 0, it.menu.id, it.menu.nama, it.menu.harga, it.qty, it.catatan)
             }
             val existingId = editingOrderId
-            if (existingId != null) {
-                repo.updateOrderWithItems(Order(
-                    id = existingId, timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    status = OrderStatus.OPEN.id
-                ), items)
-            } else {
-                repo.simpanOrder(Order(
-                    timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    status = OrderStatus.OPEN.id
-                ), items)
-            }
+            val shiftId = repo.getActiveShiftId() ?: 0L
+            val order = Order(
+                id = existingId ?: 0,
+                timestamp = System.currentTimeMillis(),
+                nomorMeja = nomorMeja, tipeOrder = tipeOrder,
+                namaPelanggan = namaPelanggan,
+                subtotal = sub,
+                diskonTipe = diskonTipe, diskonValue = diskonValue,
+                diskonAmount = diskon,
+                pajakPersen = pajakPersen, pajakAmount = pajak,
+                total = totalInt,
+                status = OrderStatus.OPEN.id,
+                shiftId = shiftId
+            )
+            if (existingId != null) repo.updateOrderWithItems(order, items)
+            else repo.simpanOrder(order, items)
             resetOrder(); onDone()
         }
     }
@@ -135,35 +161,35 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
         val lines = cart.value
         if (lines.isEmpty()) return
         viewModelScope.launch {
-            val totalInt = lines.sumOf { it.subtotal }
+            val sub = lines.sumOf { it.subtotal }
+            val diskon = hitungDiskon(sub)
+            val pajak = hitungPajak(sub - diskon)
+            val totalInt = sub - diskon + pajak
             val items = lines.map {
                 OrderItem(0, 0, it.menu.id, it.menu.nama, it.menu.harga, it.qty, it.catatan)
             }
             val u = Session.current
             val existingId = editingOrderId
-            val id: Long
-            if (existingId != null) {
-                repo.updateOrderWithItems(Order(
-                    id = existingId, timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    metodeBayar = metode, dibayar = dibayar,
-                    kembalian = (dibayar - totalInt).coerceAtLeast(0),
-                    status = OrderStatus.PAID.id,
-                    kasirId = u?.id ?: "", kasirNama = u?.nama ?: ""
-                ), items)
-                id = existingId
-            } else {
-                id = repo.simpanOrder(Order(
-                    timestamp = System.currentTimeMillis(),
-                    nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                    namaPelanggan = namaPelanggan, total = totalInt,
-                    metodeBayar = metode, dibayar = dibayar,
-                    kembalian = (dibayar - totalInt).coerceAtLeast(0),
-                    status = OrderStatus.PAID.id,
-                    kasirId = u?.id ?: "", kasirNama = u?.nama ?: ""
-                ), items)
-            }
+            val shiftId = repo.getActiveShiftId() ?: 0L
+            val order = Order(
+                id = existingId ?: 0,
+                timestamp = System.currentTimeMillis(),
+                nomorMeja = nomorMeja, tipeOrder = tipeOrder,
+                namaPelanggan = namaPelanggan,
+                subtotal = sub,
+                diskonTipe = diskonTipe, diskonValue = diskonValue,
+                diskonAmount = diskon,
+                pajakPersen = pajakPersen, pajakAmount = pajak,
+                total = totalInt,
+                metodeBayar = metode, dibayar = dibayar,
+                kembalian = (dibayar - totalInt).coerceAtLeast(0),
+                status = OrderStatus.PAID.id,
+                kasirId = u?.id ?: "", kasirNama = u?.nama ?: "",
+                shiftId = shiftId
+            )
+            val id: Long = if (existingId != null) {
+                repo.updateOrderWithItems(order, items); existingId
+            } else repo.simpanOrder(order, items)
             resetOrder(); onDone(id)
         }
     }
@@ -187,9 +213,15 @@ class OpenBillViewModel(repo: PosRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 }
 
-class RiwayatViewModel(repo: PosRepository) : ViewModel() {
+class RiwayatViewModel(private val repo: PosRepository) : ViewModel() {
     val orders: StateFlow<List<Order>> = repo.paidOrders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    fun voidOrder(id: Long, reason: String, onDone: () -> Unit = {}) =
+        viewModelScope.launch { repo.voidOrder(id, reason); onDone() }
+    fun refundOrder(id: Long, reason: String, onDone: () -> Unit = {}) =
+        viewModelScope.launch { repo.refundOrder(id, reason); onDone() }
+    suspend fun itemsOf(orderId: Long) = repo.itemsOf(orderId)
+    suspend fun getOrder(id: Long) = repo.getOrder(id)
 }
 
 class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
@@ -204,6 +236,10 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
     val transaksiHariIni: StateFlow<Int> = repo.countPaidSince(startOfDay)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val omzetHariIni: StateFlow<Int> = repo.sumPaidSince(startOfDay)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val diskonHariIni: StateFlow<Int> = repo.sumDiskonSince(startOfDay)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+    val pajakHariIni: StateFlow<Int> = repo.sumPajakSince(startOfDay)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val transaksiTerakhir: StateFlow<List<Order>> = repo.observePaidSince(startOfDay)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -222,9 +258,8 @@ class PosVMFactory(private val repo: PosRepository) : ViewModelProvider.Factory 
 }
 
 // ═══════════════════════════════════════════════════════════
-// ROUTES — pakai Activity sebagai owner → 1 VM shared
+// ROUTES
 // ═══════════════════════════════════════════════════════════
-
 @Composable
 private fun activityOwner(): ComponentActivity =
     LocalContext.current as ComponentActivity
@@ -254,9 +289,29 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
     val factory = remember { PosVMFactory(app.posRepo) }
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
+    val scope = rememberCoroutineScope()
+
     BayarScreen(vm,
         onBack = { nav.popBackStack() },
-        onSelesai = { nav.popBackStack(Routes.MAIN, inclusive = false) })
+        onSelesai = { orderId ->
+            scope.launch {
+                try {
+                    if (app.settingRepo.isAutoPrint()) {
+                        val order = app.posRepo.getOrder(orderId)
+                        val items = app.posRepo.itemsOf(orderId)
+                        if (order != null) {
+                            if (!PrinterService.isConnected()) {
+                                val mac = app.settingRepo.getPrinterMac()
+                                if (mac.isNotBlank())
+                                    PrinterService.connect(app, mac)
+                            }
+                            cetakStruk(app.settingRepo, order, items)
+                        }
+                    }
+                } catch (_: Exception) {}
+                nav.popBackStack(Routes.MAIN, inclusive = false)
+            }
+        })
 }
 
 @Composable
@@ -318,7 +373,8 @@ fun PosScreen(vm: KasirViewModel, onOpenKeranjang: () -> Unit, onBayar: () -> Un
             Box(Modifier.fillMaxSize()) {
                 MenuPane(vm, Modifier.fillMaxSize(), isTablet = false)
                 val cart by vm.cart.collectAsState()
-                val total by vm.total.collectAsState()
+                val subtotal by vm.subtotal.collectAsState()
+                val total = vm.hitungTotal(subtotal)
                 if (cart.isNotEmpty()) {
                     Surface(
                         modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
@@ -379,18 +435,15 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            // Order meta bar — hanya tampil sesuai fitur
             if (FeatureManager.isEnabled(FeatureKey.NOMOR_MEJA)) {
                 OrderMetaBar(vm)
             }
 
-            // Search box — diperkecil
             OutlinedTextField(
                 value = vm.searchQuery, onValueChange = { vm.searchQuery = it },
-                placeholder = { Text("Cari menu", style = MaterialTheme.typography.bodySmall) },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, null, Modifier.size(18.dp))
-                },
+                placeholder = { Text("Cari menu",
+                    style = MaterialTheme.typography.bodySmall) },
+                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                 trailingIcon = {
                     if (vm.searchQuery.isNotEmpty()) {
                         IconButton(onClick = { vm.searchQuery = "" },
@@ -407,7 +460,6 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                     .height(52.dp)
             )
 
-            // Kategori
             if (kategoriList.size > 1) {
                 LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -536,9 +588,20 @@ private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
 @Composable
 fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> Unit) {
     val cart by vm.cart.collectAsState()
-    val total by vm.total.collectAsState()
+    val subtotal by vm.subtotal.collectAsState()
+    val diskonAmount = vm.hitungDiskon(subtotal)
+    val afterDiskon = subtotal - diskonAmount
+    val pajakAmount = vm.hitungPajak(afterDiskon)
+    val total = afterDiskon + pajakAmount
+
     var noteFor by remember { mutableStateOf<CartLine?>(null) }
+    var showDiskon by remember { mutableStateOf(false) }
+    var showPajak by remember { mutableStateOf(false) }
+
     val modifierEnabled = FeatureManager.isEnabled(FeatureKey.MODIFIER)
+    val diskonEnabled = FeatureManager.isEnabled(FeatureKey.DISKON)
+            && Session.can(PermissionKey.DISKON)
+    val pajakEnabled = FeatureManager.isEnabled(FeatureKey.PAJAK)
     val openBillEnabled = FeatureManager.isEnabled(FeatureKey.OPEN_BILL)
             && Session.can(PermissionKey.OPEN_BILL)
 
@@ -586,15 +649,78 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                         onEditNote = { noteFor = line },
                         showNote = modifierEnabled)
                 }
+
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()) {
+                        if (diskonEnabled) {
+                            OutlinedButton(
+                                onClick = { showDiskon = true },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.LocalOffer, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    if (vm.diskonTipe == "NONE") "Diskon"
+                                    else if (vm.diskonTipe == "PERSEN") "Disc ${vm.diskonValue}%"
+                                    else "Disc ${vm.diskonValue.rupiah()}",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                        if (pajakEnabled) {
+                            OutlinedButton(
+                                onClick = { showPajak = true },
+                                modifier = Modifier.weight(1f),
+                                contentPadding = PaddingValues(vertical = 8.dp)
+                            ) {
+                                Icon(Icons.Default.Receipt, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    if (vm.pajakPersen == 0) "Pajak"
+                                    else "PPN ${vm.pajakPersen}%",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
         HorizontalDivider()
         Surface(color = MaterialTheme.colorScheme.surface) {
             Column(Modifier.fillMaxWidth().padding(16.dp)) {
+                if (subtotal > 0) {
+                    Row {
+                        Text("Subtotal", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall)
+                        Text(subtotal.rupiah(),
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (diskonAmount > 0) {
+                        Row {
+                            Text("Diskon", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall, color = DANGER)
+                            Text("- ${diskonAmount.rupiah()}",
+                                style = MaterialTheme.typography.bodySmall, color = DANGER)
+                        }
+                    }
+                    if (pajakAmount > 0) {
+                        Row {
+                            Text("Pajak ${vm.pajakPersen}%", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall)
+                            Text(pajakAmount.rupiah(),
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                }
                 Row {
                     Text("Total", Modifier.weight(1f),
-                        style = MaterialTheme.typography.titleMedium)
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold)
                     Text(total.rupiah(), fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.titleLarge, color = BRAND)
                 }
@@ -629,6 +755,125 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
             }
         )
     }
+    if (showDiskon) DiskonDialog(vm, subtotal) { showDiskon = false }
+    if (showPajak) PajakDialog(vm) { showPajak = false }
+}
+
+@Composable
+private fun DiskonDialog(vm: KasirViewModel, subtotal: Int, onDismiss: () -> Unit) {
+    var tipe by remember { mutableStateOf(vm.diskonTipe) }
+    var valueText by remember {
+        mutableStateOf(if (vm.diskonValue > 0) vm.diskonValue.toString() else "")
+    }
+    val value = valueText.toIntOrNull() ?: 0
+    val preview = when (tipe) {
+        "NOMINAL" -> value.coerceIn(0, subtotal)
+        "PERSEN" -> subtotal * value.coerceIn(0, 100) / 100
+        else -> 0
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Atur Diskon") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(selected = tipe == "NONE",
+                        onClick = { tipe = "NONE"; valueText = "" },
+                        label = { Text("Tanpa Diskon",
+                            style = MaterialTheme.typography.bodySmall) })
+                    FilterChip(selected = tipe == "NOMINAL",
+                        onClick = { tipe = "NOMINAL" },
+                        label = { Text("Rp", style = MaterialTheme.typography.bodySmall) })
+                    FilterChip(selected = tipe == "PERSEN",
+                        onClick = { tipe = "PERSEN" },
+                        label = { Text("%", style = MaterialTheme.typography.bodySmall) })
+                }
+                if (tipe != "NONE") {
+                    OutlinedTextField(valueText,
+                        { valueText = it.filter { c -> c.isDigit() }.take(7) },
+                        label = { Text(if (tipe == "PERSEN") "Persen (0-100)"
+                        else "Nominal (Rp)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        singleLine = true, modifier = Modifier.fillMaxWidth())
+                    if (tipe == "PERSEN") {
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            items(listOf(5, 10, 15, 20, 25, 50)) { p ->
+                                AssistChip(onClick = { valueText = p.toString() },
+                                    label = { Text("$p%",
+                                        style = MaterialTheme.typography.bodySmall) })
+                            }
+                        }
+                    }
+                }
+                if (preview > 0) {
+                    Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text("Diskon: - ${preview.rupiah()}",
+                                color = DANGER, fontWeight = FontWeight.SemiBold)
+                            Text("Harga jadi: ${(subtotal - preview).rupiah()}",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (tipe == "NONE" || value <= 0) {
+                    vm.diskonTipe = "NONE"; vm.diskonValue = 0
+                } else {
+                    vm.diskonTipe = tipe
+                    vm.diskonValue = if (tipe == "PERSEN") value.coerceIn(0, 100) else value
+                }
+                onDismiss()
+            }) { Text("Simpan") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
+}
+
+@Composable
+private fun PajakDialog(vm: KasirViewModel, onDismiss: () -> Unit) {
+    var valueText by remember {
+        mutableStateOf(if (vm.pajakPersen > 0) vm.pajakPersen.toString() else "")
+    }
+    val value = valueText.toIntOrNull() ?: 0
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Atur Pajak / PPN") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(valueText,
+                    { valueText = it.filter { c -> c.isDigit() }.take(3) },
+                    label = { Text("Persen PPN (0-100)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(listOf(0, 5, 10, 11, 12, 15)) { p ->
+                        AssistChip(
+                            onClick = { valueText = if (p == 0) "" else p.toString() },
+                            label = { Text(if (p == 0) "Tanpa PPN" else "$p%",
+                                style = MaterialTheme.typography.bodySmall) }
+                        )
+                    }
+                }
+                Text("Pajak dihitung dari harga setelah diskon.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                vm.pajakPersen = value.coerceIn(0, 100); onDismiss()
+            }) { Text("Simpan") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
 }
 
 @Composable
@@ -646,8 +891,7 @@ private fun CartLineItem(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = onRemove,
-                    modifier = Modifier.size(28.dp)) {
+                IconButton(onClick = onRemove, modifier = Modifier.size(28.dp)) {
                     Icon(Icons.Default.Close, null, Modifier.size(16.dp))
                 }
             }
@@ -672,8 +916,7 @@ private fun CartLineItem(
                 Spacer(Modifier.weight(1f))
                 if (showNote) {
                     IconButton(onClick = onEditNote, modifier = Modifier.size(28.dp)) {
-                        Icon(Icons.Default.Edit, null, Modifier.size(16.dp),
-                            tint = BRAND)
+                        Icon(Icons.Default.Edit, null, Modifier.size(16.dp), tint = BRAND)
                     }
                 }
                 Text(line.subtotal.rupiah(), fontWeight = FontWeight.Bold,
@@ -703,7 +946,8 @@ private fun NoteDialog(
                         "Tanpa sambal", "Goreng kering")) { t ->
                         AssistChip(onClick = {
                             text = if (text.isBlank()) t else "$text, $t"
-                        }, label = { Text(t, style = MaterialTheme.typography.bodySmall) })
+                        }, label = { Text(t,
+                            style = MaterialTheme.typography.bodySmall) })
                     }
                 }
             }
@@ -739,8 +983,13 @@ fun KeranjangScreen(vm: KasirViewModel, onBack: () -> Unit, onBayar: () -> Unit)
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
-    val total by vm.total.collectAsState()
+fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: (Long) -> Unit) {
+    val subtotal by vm.subtotal.collectAsState()
+    val diskonAmount = vm.hitungDiskon(subtotal)
+    val afterDiskon = subtotal - diskonAmount
+    val pajakAmount = vm.hitungPajak(afterDiskon)
+    val total = afterDiskon + pajakAmount
+
     var metode by remember { mutableStateOf(PaymentMethod.CASH.id) }
     var dibayarText by remember { mutableStateOf("") }
     val dibayar = dibayarText.toIntOrNull() ?: 0
@@ -759,6 +1008,33 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                 Column(Modifier.padding(16.dp)) {
+                    if (subtotal > 0) {
+                        Row {
+                            Text("Subtotal", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall)
+                            Text(subtotal.rupiah(),
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (diskonAmount > 0) {
+                            Row {
+                                Text("Diskon", Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DANGER)
+                                Text("- ${diskonAmount.rupiah()}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = DANGER)
+                            }
+                        }
+                        if (pajakAmount > 0) {
+                            Row {
+                                Text("PPN ${vm.pajakPersen}%", Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall)
+                                Text(pajakAmount.rupiah(),
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                        Spacer(Modifier.height(6.dp))
+                    }
                     Text("Total tagihan", style = MaterialTheme.typography.bodyMedium)
                     Text(total.rupiah(), style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold, color = BRAND)
@@ -779,7 +1055,8 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(PaymentMethod.values().toList()) { m ->
                     FilterChip(selected = metode == m.id, onClick = { metode = m.id },
-                        label = { Text(m.label, style = MaterialTheme.typography.bodySmall) })
+                        label = { Text(m.label,
+                            style = MaterialTheme.typography.bodySmall) })
                 }
             }
 
@@ -791,7 +1068,8 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
                 QuickCash(total) { dibayarText = it.toString() }
                 Row {
-                    Text("Kembalian", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
+                    Text("Kembalian", Modifier.weight(1f),
+                        fontWeight = FontWeight.SemiBold)
                     Text(kembalian.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
                 }
             }
@@ -799,9 +1077,9 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
             Spacer(Modifier.weight(1f))
             Button(
                 onClick = {
-                    vm.checkout(metode, if (metode == PaymentMethod.CASH.id) dibayar else total) {
-                        onSelesai()
-                    }
+                    vm.checkout(metode,
+                        if (metode == PaymentMethod.CASH.id) dibayar else total
+                    ) { id -> onSelesai(id) }
                 },
                 enabled = cukup,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -866,12 +1144,16 @@ fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text(o.total.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
+                                Text(o.total.rupiah(), fontWeight = FontWeight.Bold,
+                                    color = BRAND)
                                 Spacer(Modifier.height(6.dp))
                                 Button(onClick = { onPick(o.id) },
-                                    colors = ButtonDefaults.buttonColors(containerColor = BRAND),
-                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
-                                    Text("Bayar", style = MaterialTheme.typography.bodySmall)
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BRAND),
+                                    contentPadding = PaddingValues(
+                                        horizontal = 12.dp, vertical = 4.dp)) {
+                                    Text("Bayar",
+                                        style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
@@ -963,6 +1245,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     val ctx = LocalContext.current
     var nama by remember { mutableStateOf("") }
     var hargaText by remember { mutableStateOf("") }
+    var hargaBeliText by remember { mutableStateOf("") }
     var kategori by remember { mutableStateOf("Umum") }
     var fotoUri by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
@@ -972,6 +1255,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
         if (menuId != null) {
             vm.get(menuId)?.let {
                 nama = it.nama; hargaText = it.harga.toString()
+                hargaBeliText = if (it.hargaBeli > 0) it.hargaBeli.toString() else ""
                 kategori = it.kategori; fotoUri = it.fotoUri; tersedia = it.tersedia
             }
             loaded = true
@@ -1023,7 +1307,14 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(hargaText,
                     { hargaText = it.filter { c -> c.isDigit() } },
-                    label = { Text("Harga") },
+                    label = { Text("Harga jual") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+                OutlinedTextField(hargaBeliText,
+                    { hargaBeliText = it.filter { c -> c.isDigit() } },
+                    label = { Text("Harga beli / HPP (opsional)") },
+                    supportingText = { Text("Dipakai untuk hitung laba di Laporan",
+                        style = MaterialTheme.typography.labelSmall) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
                 OutlinedTextField(kategori, { kategori = it },
@@ -1038,9 +1329,11 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     onClick = {
                         val harga = hargaText.toIntOrNull() ?: 0
                         if (nama.isBlank() || harga <= 0) return@Button
+                        val hargaBeli = hargaBeliText.toIntOrNull() ?: 0
                         vm.save(MenuItem(
                             id = menuId ?: 0,
                             nama = nama.trim(), harga = harga,
+                            hargaBeli = hargaBeli,
                             kategori = kategori.trim().ifBlank { "Umum" },
                             fotoUri = fotoUri, tersedia = tersedia
                         )) { onBack() }
@@ -1054,12 +1347,16 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// RIWAYAT
+// RIWAYAT + VOID/REFUND + REPRINT
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RiwayatScreen(vm: RiwayatViewModel) {
     val orders by vm.orders.collectAsState()
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var selected by remember { mutableStateOf<Order?>(null) }
+
     Scaffold(topBar = { TopAppBar(title = { Text("Riwayat Transaksi") }) }) { pad ->
         if (orders.isEmpty()) {
             Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1070,29 +1367,290 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(orders, key = { it.id }) { o ->
-                    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
-                        Row(Modifier.padding(14.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(buildString {
-                                    if (o.nomorMeja.isNotBlank()) append("Meja ${o.nomorMeja} • ")
-                                    append(PaymentMethod.fromId(o.metodeBayar).label)
-                                }, fontWeight = FontWeight.SemiBold)
-                                Text(buildString {
-                                    append(o.timestamp.tanggal())
-                                    if (o.kasirNama.isNotBlank()) {
-                                        append(" • "); append(o.kasirNama)
-                                    }
-                                }, style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text(o.total.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
+                    RiwayatCard(o) { selected = o }
+                }
+            }
+        }
+    }
+
+    selected?.let { order ->
+        OrderDetailDialog(
+            order = order,
+            vm = vm,
+            onDismiss = { selected = null },
+            onCetak = {
+                scope.launch {
+                    try {
+                        val app = ctx.applicationContext as IyonzApp
+                        if (!PrinterService.isConnected()) {
+                            val mac = app.settingRepo.getPrinterMac()
+                            if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
                         }
+                        val items = app.posRepo.itemsOf(order.id)
+                        cetakStruk(app.settingRepo, order, items)
+                    } catch (_: Exception) {}
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun RiwayatCard(o: Order, onClick: () -> Unit) {
+    Card(Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = RoundedCornerShape(10.dp)) {
+        Column(Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(buildString {
+                            if (o.nomorMeja.isNotBlank()) append("Meja ${o.nomorMeja} • ")
+                            append(PaymentMethod.fromId(o.metodeBayar).label)
+                        }, fontWeight = FontWeight.SemiBold)
+                        if (o.status == OrderStatus.VOID.id) {
+                            Spacer(Modifier.width(6.dp))
+                            Badge(containerColor = DANGER) {
+                                Text("VOID", color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall)
+                            }
+                        } else if (o.status == OrderStatus.REFUND.id) {
+                            Spacer(Modifier.width(6.dp))
+                            Badge(containerColor = WARNING) {
+                                Text("REFUND", color = Color.White,
+                                    style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                    Text(buildString {
+                        append(o.timestamp.tanggal())
+                        if (o.kasirNama.isNotBlank()) {
+                            append(" • "); append(o.kasirNama)
+                        }
+                    }, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(o.total.rupiah(), fontWeight = FontWeight.Bold,
+                        color = if (o.status == OrderStatus.PAID.id) BRAND
+                        else MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (o.diskonAmount > 0 || o.pajakAmount > 0) {
+                        Text(buildString {
+                            if (o.diskonAmount > 0) append("Disc ${o.diskonAmount.rupiah()}")
+                            if (o.pajakAmount > 0) {
+                                if (isNotEmpty()) append(" • ")
+                                append("PPN ${o.pajakAmount.rupiah()}")
+                            }
+                        }, style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun OrderDetailDialog(
+    order: Order,
+    vm: RiwayatViewModel,
+    onDismiss: () -> Unit,
+    onCetak: () -> Unit = {}
+) {
+    val scope = rememberCoroutineScope()
+    var items by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
+    var showVoidDialog by remember { mutableStateOf(false) }
+    var showRefundDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(order.id) { items = vm.itemsOf(order.id) }
+
+    val canVoid = FeatureManager.isEnabled(FeatureKey.VOID_REFUND)
+            && Session.can(PermissionKey.VOID_REFUND)
+            && order.status == OrderStatus.PAID.id
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Detail Transaksi #${order.id}")
+                Text(
+                    when (order.status) {
+                        OrderStatus.VOID.id -> "VOID — ${order.voidReason}"
+                        OrderStatus.REFUND.id -> "REFUND — ${order.voidReason}"
+                        else -> order.timestamp.tanggal()
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        text = {
+            Column(Modifier.heightIn(max = 400.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                items.forEach { it ->
+                    Row {
+                        Text("${it.qty}x", Modifier.width(36.dp),
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodySmall)
+                        Column(Modifier.weight(1f)) {
+                            Text(it.namaMenu, style = MaterialTheme.typography.bodyMedium)
+                            if (it.catatan.isNotBlank()) {
+                                Text(it.catatan,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Text(it.subtotal.rupiah(),
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                if (order.subtotal > 0) {
+                    Row {
+                        Text("Subtotal", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall)
+                        Text(order.subtotal.rupiah(),
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                if (order.diskonAmount > 0) {
+                    Row {
+                        Text("Diskon", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall, color = DANGER)
+                        Text("- ${order.diskonAmount.rupiah()}",
+                            style = MaterialTheme.typography.bodySmall, color = DANGER)
+                    }
+                }
+                if (order.pajakAmount > 0) {
+                    Row {
+                        Text("PPN ${order.pajakPersen}%", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall)
+                        Text(order.pajakAmount.rupiah(),
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+                Row {
+                    Text("Total", Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                    Text(order.total.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
+                }
+                HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                Row {
+                    Text("Metode", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall)
+                    Text(PaymentMethod.fromId(order.metodeBayar).label,
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (order.kasirNama.isNotBlank()) {
+                    Row {
+                        Text("Kasir", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall)
+                        Text(order.kasirNama,
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onCetak,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Print, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Cetak Ulang Struk")
+                }
+
+                if (canVoid) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { showVoidDialog = true },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = DANGER)
+                        ) {
+                            Icon(Icons.Default.Cancel, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Void", style = MaterialTheme.typography.bodySmall)
+                        }
+                        OutlinedButton(
+                            onClick = { showRefundDialog = true },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = WARNING)
+                        ) {
+                            Icon(Icons.Default.Replay, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Refund", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Tutup") }
+        }
+    )
+
+    if (showVoidDialog) {
+        AlasanDialog(
+            title = "Alasan Void",
+            onConfirm = { reason ->
+                scope.launch {
+                    vm.voidOrder(order.id, reason)
+                    showVoidDialog = false; onDismiss()
+                }
+            },
+            onDismiss = { showVoidDialog = false }
+        )
+    }
+    if (showRefundDialog) {
+        AlasanDialog(
+            title = "Alasan Refund",
+            onConfirm = { reason ->
+                scope.launch {
+                    vm.refundOrder(order.id, reason)
+                    showRefundDialog = false; onDismiss()
+                }
+            },
+            onDismiss = { showRefundDialog = false }
+        )
+    }
+}
+
+@Composable
+private fun AlasanDialog(
+    title: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    val quickReasons = listOf("Salah input", "Pelanggan batal", "Barang habis",
+        "Salah hitung", "Komplain pelanggan")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(text, { text = it },
+                    label = { Text("Alasan (wajib)") },
+                    placeholder = { Text("cth: salah input") },
+                    maxLines = 3, modifier = Modifier.fillMaxWidth())
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(quickReasons) { r ->
+                        AssistChip(onClick = { text = r },
+                            label = { Text(r,
+                                style = MaterialTheme.typography.bodySmall) })
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
+                enabled = text.isNotBlank()) { Text("Konfirmasi", color = DANGER) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1103,6 +1661,8 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
 fun DashboardScreen(vm: DashboardViewModel) {
     val trx by vm.transaksiHariIni.collectAsState()
     val omzet by vm.omzetHariIni.collectAsState()
+    val diskon by vm.diskonHariIni.collectAsState()
+    val pajak by vm.pajakHariIni.collectAsState()
     val recent by vm.transaksiTerakhir.collectAsState()
 
     Scaffold(topBar = { TopAppBar(title = { Text("Dashboard") }) }) { pad ->
@@ -1115,6 +1675,16 @@ fun DashboardScreen(vm: DashboardViewModel) {
                     Icons.Default.Receipt, Modifier.weight(1f))
                 StatCard("Omzet", omzet.rupiah(),
                     Icons.Default.AttachMoney, Modifier.weight(1f))
+            }
+            if (diskon > 0 || pajak > 0) {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (diskon > 0)
+                        StatCard("Diskon", "- " + diskon.rupiah(),
+                            Icons.Default.LocalOffer, Modifier.weight(1f))
+                    if (pajak > 0)
+                        StatCard("PPN", pajak.rupiah(),
+                            Icons.Default.Receipt, Modifier.weight(1f))
+                }
             }
             Spacer(Modifier.height(8.dp))
             Text("Transaksi Terakhir", fontWeight = FontWeight.SemiBold)
