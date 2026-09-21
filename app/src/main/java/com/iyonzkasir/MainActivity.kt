@@ -91,6 +91,7 @@ object Routes {
     const val TEMA = "tema"
     const val PRINTER = "printer"
     const val LAPORAN = "laporan"
+    const val BACKUP = "backup"
     const val TENTANG = "tentang"
 }
 
@@ -158,6 +159,7 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.TEMA) { TemaRoute(app, nav) }
         composable(Routes.PRINTER) { PrinterRoute(app, nav) }
         composable(Routes.LAPORAN) { LaporanRoute(app, nav) }
+        composable(Routes.BACKUP) { BackupRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
