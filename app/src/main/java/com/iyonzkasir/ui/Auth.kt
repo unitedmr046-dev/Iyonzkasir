@@ -1,5 +1,6 @@
 package com.iyonzkasir.ui
 
+import android.content.Context
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,11 +22,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
 import com.iyonzkasir.*
@@ -92,6 +97,7 @@ fun SplashScreen(
 fun OnboardingScreen(app: IyonzApp, onDone: () -> Unit) {
     var step by remember { mutableIntStateOf(0) }
     val totalSteps = 4
+    var showRestoreDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -110,7 +116,10 @@ fun OnboardingScreen(app: IyonzApp, onDone: () -> Unit) {
             )
             Box(Modifier.weight(1f)) {
                 when (step) {
-                    0 -> OnbWelcome { step++ }
+                    0 -> OnbWelcome(
+                        onNext = { step++ },
+                        onRestore = { showRestoreDialog = true }
+                    )
                     1 -> OnbSetupToko(app.settingRepo) { step++ }
                     2 -> OnbPilihBisnis(app) { step++ }
                     3 -> OnbBuatOwner(app) { onDone() }
@@ -130,10 +139,17 @@ fun OnboardingScreen(app: IyonzApp, onDone: () -> Unit) {
             }
         }
     }
+
+    if (showRestoreDialog) {
+        OnbRestoreDialog(
+            app = app,
+            onDismiss = { showRestoreDialog = false }
+        )
+    }
 }
 
 @Composable
-private fun OnbWelcome(onNext: () -> Unit) {
+private fun OnbWelcome(onNext: () -> Unit, onRestore: () -> Unit) {
     Column(Modifier.fillMaxSize().padding(24.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally) {
@@ -150,8 +166,176 @@ private fun OnbWelcome(onNext: () -> Unit) {
         Button(onClick = onNext,
             modifier = Modifier.fillMaxWidth().height(52.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BRAND)) {
-            Text("Mulai Setup", fontWeight = FontWeight.Bold)
+            Text("Mulai Setup Baru", fontWeight = FontWeight.Bold)
         }
+
+        Spacer(Modifier.height(16.dp))
+        Row(verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()) {
+            HorizontalDivider(Modifier.weight(1f))
+            Text("  atau  ", style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            HorizontalDivider(Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(16.dp))
+        OutlinedButton(onClick = onRestore,
+            modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Icon(Icons.Default.SettingsBackupRestore, null)
+            Spacer(Modifier.width(8.dp))
+            Text("Restore dari Backup", fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Punya HP baru? Pulihkan data dari file backup .iyonz",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center)
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// RESTORE DIALOG DI ONBOARDING
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun OnbRestoreDialog(app: IyonzApp, onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    var selectedUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var showPwdDialog by remember { mutableStateOf(false) }
+
+    val openLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            selectedUri = uri
+            showPwdDialog = true
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.SettingsBackupRestore, null, tint = BRAND)
+                Spacer(Modifier.width(8.dp))
+                Text("Restore dari Backup")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Pulihkan data (menu, setting, user, riwayat) dari file backup .iyonz.",
+                    style = MaterialTheme.typography.bodySmall)
+
+                if (busy) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(20.dp), color = BRAND)
+                        Spacer(Modifier.width(12.dp))
+                        Text("Memproses...", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+
+                msg?.let {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (it.startsWith("✅")) BRAND_LIGHT
+                            else if (it.startsWith("❌")) MaterialTheme.colorScheme.errorContainer
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Text(it, modifier = Modifier.padding(10.dp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (it.startsWith("❌"))
+                                MaterialTheme.colorScheme.onErrorContainer
+                            else MaterialTheme.colorScheme.onSurface)
+                    }
+                }
+
+                Text("⚠️ Restore akan menimpa semua data saat ini.",
+                    style = MaterialTheme.typography.labelSmall, color = DANGER)
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { openLauncher.launch(arrayOf("*/*")) },
+                enabled = !busy,
+                colors = ButtonDefaults.buttonColors(containerColor = BRAND)
+            ) {
+                Icon(Icons.Default.Folder, null, Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Pilih File")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Batal") }
+        }
+    )
+
+    if (showPwdDialog && selectedUri != null) {
+        var pwd by remember { mutableStateOf("") }
+        var pwdShow by remember { mutableStateOf(false) }
+        var err by remember { mutableStateOf<String?>(null) }
+
+        AlertDialog(
+            onDismissRequest = { if (!busy) showPwdDialog = false },
+            title = { Text("Password Backup") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Masukkan password yang dipakai saat backup.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedTextField(
+                        value = pwd, onValueChange = { pwd = it; err = null },
+                        label = { Text("Password") },
+                        singleLine = true,
+                        visualTransformation = if (pwdShow) VisualTransformation.None
+                        else PasswordVisualTransformation(),
+                        trailingIcon = {
+                            IconButton(onClick = { pwdShow = !pwdShow }) {
+                                Icon(if (pwdShow) Icons.Default.VisibilityOff
+                                else Icons.Default.Visibility, null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    err?.let {
+                        Text(it, color = DANGER, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (pwd.length < 6) { err = "Password minimal 6 karakter"; return@TextButton }
+                    busy = true
+                    scope.launch {
+                        val r = try {
+                            val ins = ctx.contentResolver.openInputStream(selectedUri!!)
+                                ?: return@launch
+                            val result = BackupService.restore(ctx, pwd, ins)
+                            ins.close()
+                            result
+                        } catch (e: Exception) {
+                            Result.failure(e)
+                        }
+                        busy = false
+                        r.onSuccess {
+                            msg = "✅ Restore berhasil! Restart app..."
+                            delay(1200)
+                            BackupService.restartApp(ctx)
+                        }.onFailure { e ->
+                            msg = "❌ Gagal: ${e.message ?: "Tidak diketahui"}"
+                            showPwdDialog = false
+                        }
+                    }
+                }) { Text("Restore", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPwdDialog = false }, enabled = !busy) {
+                    Text("Batal")
+                }
+            }
+        )
     }
 }
 
@@ -218,8 +402,12 @@ private fun OnbPilihBisnis(app: IyonzApp, onNext: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)) {
+
+        LazyColumn(
+            Modifier.weight(1f).fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 12.dp)
+        ) {
             items(BusinessType.values().toList()) { type ->
                 val isSelected = selected == type
                 Card(
@@ -244,14 +432,15 @@ private fun OnbPilihBisnis(app: IyonzApp, onNext: () -> Unit) {
                 }
             }
         }
-        Spacer(Modifier.height(8.dp))
+
+        Spacer(Modifier.height(12.dp))
         Button(
             onClick = {
                 val t = selected ?: return@Button
                 scope.launch {
                     app.settingRepo.set(SettingRepository.KEY_BUSINESS_TYPE, t.id)
                     if (t == BusinessType.CUSTOM) {
-                        app.featureRepo.enableAll() // user atur manual nanti
+                        app.featureRepo.enableAll()
                     } else {
                         app.featureRepo.applyPreset(t)
                     }
@@ -440,7 +629,6 @@ fun LoginScreen(
                                     scope.launch {
                                         userRepo.updateLastLogin(u.id)
                                         userRepo.log(u.id, u.nama, "LOGIN")
-                                        // Ensure permission di-seed
                                         userRepo.seedPermissionsIfEmpty(u.id, UserRole.fromId(u.role))
                                         val perms = userRepo.getPermissions(u.id)
                                             .filter { it.allowed }
@@ -741,7 +929,7 @@ private fun UserEditorDialog(
 }
 
 // ═══════════════════════════════════════════════════════════
-// DIALOG IZIN GRANULAR PER-USER
+// DIALOG IZIN
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -754,11 +942,9 @@ fun PermissionDialog(
     val saved by userRepo.observePermissions(user.id)
         .collectAsState(initial = emptyList())
 
-    // state lokal (biar bisa toggle sebelum simpan)
     var draft by remember { mutableStateOf<Map<PermissionKey, Boolean>>(emptyMap()) }
 
     LaunchedEffect(saved) {
-        // sync draft dari DB kalau belum diisi
         if (draft.isEmpty()) {
             val map = PermissionKey.values().associateWith { key ->
                 saved.firstOrNull { it.permissionKey == key.key }?.allowed ?: false
@@ -785,13 +971,11 @@ fun PermissionDialog(
         },
         text = {
             Column(Modifier.heightIn(max = 420.dp)) {
-                // Info
                 Text("Centang izin yang boleh dilakukan user ini.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Spacer(Modifier.height(8.dp))
 
-                // Tombol preset
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     AssistChip(
                         onClick = {
@@ -865,7 +1049,6 @@ fun PermissionDialog(
                             targetId = user.id,
                             keterangan = "Update izin ${user.username}")
                     }
-                    // Kalau yang diedit user sendiri, refresh session
                     if (Session.current?.id == user.id) {
                         Session.updatePermissions(draft.filterValues { it }.keys)
                     }
