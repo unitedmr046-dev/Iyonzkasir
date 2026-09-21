@@ -33,6 +33,7 @@ import androidx.navigation.NavHostController
 import com.iyonzkasir.*
 import com.iyonzkasir.data.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
 import java.text.NumberFormat
@@ -54,7 +55,8 @@ object ESC {
     val SIZE_BIG = byteArrayOf(0x1D, 0x21, 0x22)
     val FEED = byteArrayOf(0x0A)
     val CUT = byteArrayOf(0x1D, 0x56, 0x00)
-    val DRAWER = byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA)
+    // 0xFA > 127, jadi harus explicit .toByte()
+    val DRAWER = byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte())
 }
 
 // ═══════════════════════════════════════════════════════════
