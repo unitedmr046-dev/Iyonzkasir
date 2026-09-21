@@ -143,7 +143,7 @@ private fun OnbWelcome(onNext: () -> Unit) {
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(12.dp))
-        Text("Aplikasi kasir serbaguna untuk warung, retail, cafe, laundry, dan jasa.\n\nSetup 2 menit, langsung bisa jualan.",
+        Text("Aplikasi kasir serbaguna untuk warung, retail, cafe, laundry, toko bangunan, dan jasa.\n\nSetup 2 menit, langsung bisa jualan.",
             style = MaterialTheme.typography.bodyLarge, textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(32.dp))
@@ -218,7 +218,8 @@ private fun OnbPilihBisnis(app: IyonzApp, onNext: () -> Unit) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.height(16.dp))
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(bottom = 16.dp)) {
             items(BusinessType.values().toList()) { type ->
                 val isSelected = selected == type
                 Card(
@@ -243,13 +244,17 @@ private fun OnbPilihBisnis(app: IyonzApp, onNext: () -> Unit) {
                 }
             }
         }
-        Spacer(Modifier.height(16.dp))
+        Spacer(Modifier.height(8.dp))
         Button(
             onClick = {
                 val t = selected ?: return@Button
                 scope.launch {
                     app.settingRepo.set(SettingRepository.KEY_BUSINESS_TYPE, t.id)
-                    app.featureRepo.applyPreset(t)
+                    if (t == BusinessType.CUSTOM) {
+                        app.featureRepo.enableAll() // user atur manual nanti
+                    } else {
+                        app.featureRepo.applyPreset(t)
+                    }
                     onNext()
                 }
             },
@@ -318,12 +323,14 @@ private fun OnbBuatOwner(app: IyonzApp, onDone: () -> Unit) {
                             } else {
                                 val salt = PinHasher.generateSalt()
                                 val hash = PinHasher.hash(pin, salt)
-                                app.userRepo.upsert(User(
+                                val user = User(
                                     nama = nama.trim(),
                                     username = username.trim(),
                                     pinHash = hash, pinSalt = salt,
                                     role = UserRole.OWNER.id
-                                ))
+                                )
+                                app.userRepo.upsert(user)
+                                app.userRepo.applyRolePreset(user.id, UserRole.OWNER)
                                 app.settingRepo.setOnboardingDone()
                                 app.userRepo.log("system", "system", "ONBOARDING_COMPLETE",
                                     keterangan = "Owner $username dibuat")
@@ -349,7 +356,10 @@ private fun OnbBuatOwner(app: IyonzApp, onDone: () -> Unit) {
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LoginScreen(userRepo: UserRepository, onLoggedIn: (User) -> Unit) {
+fun LoginScreen(
+    userRepo: UserRepository,
+    onLoggedIn: (User, Set<PermissionKey>) -> Unit
+) {
     val scope = rememberCoroutineScope()
     val users by userRepo.activeUsers.collectAsState(initial = emptyList())
     var selectedUser by remember { mutableStateOf<User?>(null) }
@@ -430,7 +440,13 @@ fun LoginScreen(userRepo: UserRepository, onLoggedIn: (User) -> Unit) {
                                     scope.launch {
                                         userRepo.updateLastLogin(u.id)
                                         userRepo.log(u.id, u.nama, "LOGIN")
-                                        onLoggedIn(u)
+                                        // Ensure permission di-seed
+                                        userRepo.seedPermissionsIfEmpty(u.id, UserRole.fromId(u.role))
+                                        val perms = userRepo.getPermissions(u.id)
+                                            .filter { it.allowed }
+                                            .mapNotNull { PermissionKey.fromKey(it.permissionKey) }
+                                            .toSet()
+                                        onLoggedIn(u, perms)
                                     }
                                 } else if (pin.length >= 8) {
                                     failedAttempts++
@@ -523,7 +539,7 @@ private fun PinKey(label: String, onClick: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// KELOLA USER
+// KELOLA USER + IZIN
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -532,6 +548,7 @@ fun KelolaUserRoute(app: IyonzApp, nav: NavHostController) {
     val users by app.userRepo.users.collectAsState(initial = emptyList())
     var editing by remember { mutableStateOf<User?>(null) }
     var showAdd by remember { mutableStateOf(false) }
+    var editingPerm by remember { mutableStateOf<User?>(null) }
     var ownerCount by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(users) { ownerCount = app.userRepo.ownerCount() }
@@ -559,40 +576,54 @@ fun KelolaUserRoute(app: IyonzApp, nav: NavHostController) {
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(users, key = { it.id }) { u ->
                 Card(Modifier.fillMaxWidth()) {
-                    Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(48.dp).clip(CircleShape).background(BRAND_LIGHT),
-                            contentAlignment = Alignment.Center) {
-                            if (u.fotoUri != null) {
-                                AsyncImage(u.fotoUri, null, contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize())
-                            } else {
-                                Text(u.nama.take(1).uppercase(),
-                                    color = BRAND, fontWeight = FontWeight.Bold)
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(Modifier.size(48.dp).clip(CircleShape).background(BRAND_LIGHT),
+                                contentAlignment = Alignment.Center) {
+                                if (u.fotoUri != null) {
+                                    AsyncImage(u.fotoUri, null,
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize())
+                                } else {
+                                    Text(u.nama.take(1).uppercase(),
+                                        color = BRAND, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text(u.nama, fontWeight = FontWeight.SemiBold)
+                                Text("${UserRole.fromId(u.role).label} • @${u.username}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (!u.aktif) Text("Nonaktif", color = DANGER,
+                                    style = MaterialTheme.typography.labelSmall)
+                            }
+                            IconButton(onClick = { editing = u }) {
+                                Icon(Icons.Default.Edit, null)
+                            }
+                            if (u.role != UserRole.OWNER.id || ownerCount > 1) {
+                                IconButton(onClick = {
+                                    scope.launch {
+                                        app.userRepo.delete(u)
+                                        Session.current?.let { cu ->
+                                            app.userRepo.log(cu.id, cu.nama, "DELETE_USER",
+                                                targetId = u.id, keterangan = "Hapus ${u.username}")
+                                        }
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Delete, null, tint = DANGER)
+                                }
                             }
                         }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(u.nama, fontWeight = FontWeight.SemiBold)
-                            Text("${UserRole.fromId(u.role).label} • @${u.username}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            if (!u.aktif) Text("Nonaktif", color = DANGER,
-                                style = MaterialTheme.typography.labelSmall)
-                        }
-                        IconButton(onClick = { editing = u }) {
-                            Icon(Icons.Default.Edit, null)
-                        }
-                        if (u.role != UserRole.OWNER.id || ownerCount > 1) {
-                            IconButton(onClick = {
-                                scope.launch {
-                                    app.userRepo.delete(u)
-                                    Session.current?.let { cu ->
-                                        app.userRepo.log(cu.id, cu.nama, "DELETE_USER",
-                                            targetId = u.id, keterangan = "Hapus ${u.username}")
-                                    }
-                                }
-                            }) {
-                                Icon(Icons.Default.Delete, null, tint = DANGER)
+                        Spacer(Modifier.height(8.dp))
+                        Row {
+                            OutlinedButton(
+                                onClick = { editingPerm = u },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Lock, null, Modifier.size(16.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Atur Izin", style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -605,13 +636,17 @@ fun KelolaUserRoute(app: IyonzApp, nav: NavHostController) {
         UserEditorDialog(
             user = editing,
             onDismiss = { showAdd = false; editing = null },
-            onSave = { user ->
+            onSave = { user, roleChanged ->
                 scope.launch {
+                    val isNew = editing == null
                     app.userRepo.upsert(user)
+                    if (isNew || roleChanged) {
+                        app.userRepo.applyRolePreset(user.id, UserRole.fromId(user.role))
+                    }
                     app.userRepo.log(
                         Session.current?.id ?: "system",
                         Session.current?.nama ?: "system",
-                        if (editing == null) "ADD_USER" else "EDIT_USER",
+                        if (isNew) "ADD_USER" else "EDIT_USER",
                         targetId = user.id, keterangan = "User ${user.username}"
                     )
                     showAdd = false
@@ -620,13 +655,21 @@ fun KelolaUserRoute(app: IyonzApp, nav: NavHostController) {
             }
         )
     }
+
+    editingPerm?.let { target ->
+        PermissionDialog(
+            user = target,
+            userRepo = app.userRepo,
+            onDismiss = { editingPerm = null }
+        )
+    }
 }
 
 @Composable
 private fun UserEditorDialog(
     user: User?,
     onDismiss: () -> Unit,
-    onSave: (User) -> Unit
+    onSave: (User, Boolean) -> Unit
 ) {
     var nama by remember { mutableStateOf(user?.nama ?: "") }
     var username by remember { mutableStateOf(user?.username ?: "") }
@@ -634,6 +677,7 @@ private fun UserEditorDialog(
     var pin by remember { mutableStateOf("") }
     var aktif by remember { mutableStateOf(user?.aktif ?: true) }
     var error by remember { mutableStateOf<String?>(null) }
+    val originalRole = remember { user?.role }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -678,11 +722,154 @@ private fun UserEditorDialog(
                         else (user?.pinSalt ?: PinHasher.generateSalt())
                         val hash = if (pin.isNotBlank()) PinHasher.hash(pin, salt)
                         else (user?.pinHash ?: "")
-                        onSave((user ?: User()).copy(
-                            nama = nama.trim(), username = username.trim(),
-                            role = role.id, pinSalt = salt, pinHash = hash, aktif = aktif
-                        ))
+                        val roleChanged = originalRole != null && originalRole != role.id
+                        onSave(
+                            (user ?: User()).copy(
+                                nama = nama.trim(), username = username.trim(),
+                                role = role.id, pinSalt = salt, pinHash = hash, aktif = aktif
+                            ),
+                            roleChanged
+                        )
                     }
+                }
+            }) { Text("Simpan") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
+}
+
+// ═══════════════════════════════════════════════════════════
+// DIALOG IZIN GRANULAR PER-USER
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PermissionDialog(
+    user: User,
+    userRepo: UserRepository,
+    onDismiss: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val saved by userRepo.observePermissions(user.id)
+        .collectAsState(initial = emptyList())
+
+    // state lokal (biar bisa toggle sebelum simpan)
+    var draft by remember { mutableStateOf<Map<PermissionKey, Boolean>>(emptyMap()) }
+
+    LaunchedEffect(saved) {
+        // sync draft dari DB kalau belum diisi
+        if (draft.isEmpty()) {
+            val map = PermissionKey.values().associateWith { key ->
+                saved.firstOrNull { it.permissionKey == key.key }?.allowed ?: false
+            }
+            draft = map
+        }
+    }
+
+    val grouped = remember(draft) {
+        PermissionKey.byKategori().mapValues { entry ->
+            entry.value.map { it to (draft[it] ?: false) }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text("Izin — ${user.nama}")
+                Text(UserRole.fromId(user.role).label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        text = {
+            Column(Modifier.heightIn(max = 420.dp)) {
+                // Info
+                Text("Centang izin yang boleh dilakukan user ini.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+
+                // Tombol preset
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    AssistChip(
+                        onClick = {
+                            val presets = UserRole.fromId(user.role).defaultPermissions
+                            draft = PermissionKey.values().associateWith { it in presets }
+                        },
+                        label = { Text("Preset ${UserRole.fromId(user.role).label}",
+                            style = MaterialTheme.typography.bodySmall) }
+                    )
+                    AssistChip(
+                        onClick = {
+                            draft = PermissionKey.values().associateWith { true }
+                        },
+                        label = { Text("Semua", style = MaterialTheme.typography.bodySmall) }
+                    )
+                    AssistChip(
+                        onClick = {
+                            draft = PermissionKey.values().associateWith { false }
+                        },
+                        label = { Text("Kosong", style = MaterialTheme.typography.bodySmall) }
+                    )
+                }
+
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    grouped.forEach { (kategori, items) ->
+                        item {
+                            Text(kategori,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold,
+                                color = BRAND,
+                                modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                        }
+                        items(items, key = { it.first.key }) { (perm, allowed) ->
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        draft = draft + (perm to !allowed)
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = allowed,
+                                    onCheckedChange = { c ->
+                                        draft = draft + (perm to c)
+                                    }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Column(Modifier.weight(1f)) {
+                                    Text(perm.label,
+                                        style = MaterialTheme.typography.bodyMedium)
+                                    if (perm.deskripsi.isNotBlank()) {
+                                        Text(perm.deskripsi,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                scope.launch {
+                    userRepo.setPermissionsBatch(user.id, draft)
+                    Session.current?.let { cu ->
+                        userRepo.log(cu.id, cu.nama, "EDIT_PERMISSIONS",
+                            targetId = user.id,
+                            keterangan = "Update izin ${user.username}")
+                    }
+                    // Kalau yang diedit user sendiri, refresh session
+                    if (Session.current?.id == user.id) {
+                        Session.updatePermissions(draft.filterValues { it }.keys)
+                    }
+                    onDismiss()
                 }
             }) { Text("Simpan") }
         },
