@@ -5,6 +5,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -34,6 +37,17 @@ fun Long.tanggalPendek(): String =
 fun Long.jamPendek(): String =
     SimpleDateFormat("HH:mm", Locale("in", "ID")).format(Date(this))
 
+// ═══════ TEMA MODE ═══════
+enum class ThemeMode(val id: String, val label: String) {
+    SYSTEM("system", "Ikut Sistem"),
+    LIGHT("light", "Terang"),
+    DARK("dark", "Gelap");
+
+    companion object {
+        fun fromId(id: String) = values().firstOrNull { it.id == id } ?: SYSTEM
+    }
+}
+
 // ═══════ ENUMS ═══════
 enum class UserRole(val id: String, val label: String, val pinMin: Int) {
     OWNER("owner", "Pemilik", 6),
@@ -49,10 +63,12 @@ enum class BusinessType(
     val id: String, val label: String, val emoji: String, val deskripsi: String
 ) {
     WARUNG("warung", "Warung / Retail", "🏪", "Jualan harian, cepat & simpel"),
-    RETAIL("retail", "Retail Lengkap", "🛒", "Barcode, grosir, supplier"),
-    FNB("fnb", "F&B / Cafe / Resto", "🍽️", "Nomor meja, kitchen print"),
+    RETAIL("retail", "Retail Lengkap", "🛒", "Barcode, grosir, potong stok"),
+    FNB("fnb", "F&B / Cafe / Resto", "🍽️", "Nomor meja, kitchen print, modifier"),
     LAUNDRY("laundry", "Laundry", "👕", "Status tracking, DP, estimasi"),
-    JASA("jasa", "Jasa Umum", "🔧", "Jadwal servis, reminder");
+    TOKO_BANGUNAN("bangunan", "Toko Bangunan", "🏗️", "Grosir, satuan, retur"),
+    JASA("jasa", "Jasa Umum", "🔧", "Jadwal servis, reminder"),
+    CUSTOM("custom", "Custom", "⚙️", "Atur sendiri fitur yang mau dipakai");
 
     companion object {
         fun fromId(id: String) = values().firstOrNull { it.id == id } ?: WARUNG
@@ -109,8 +125,6 @@ enum class FeatureKey(
     HARGA_GROSIR("pos_harga_grosir", "Harga Grosir", "POS", "Harga khusus pembelian banyak"),
     DISKON("pos_diskon", "Diskon", "POS", "Diskon nominal atau persen"),
     PAJAK("pos_pajak", "Pajak / PPN", "POS", "Hitung pajak otomatis"),
-    SERVICE_CHARGE("pos_service_charge", "Service Charge", "POS", "Biaya layanan"),
-    TIP("pos_tip", "Tip", "POS", "Tip untuk pelayan"),
     VOID_REFUND("pos_void_refund", "Void / Refund", "POS", "Batalkan transaksi"),
     HOLD_ORDER("pos_hold_order", "Hold Order", "POS", "Tahan pesanan sementara"),
 
@@ -118,10 +132,7 @@ enum class FeatureKey(
     POTONG_STOK("inv_potong_stok", "Potong Stok Otomatis", "Inventaris", "Kurangi stok saat jual"),
     LOW_STOCK_ALERT("inv_low_stock", "Alert Stok Menipis", "Inventaris", "Notifikasi stok minim"),
     RESEP("inv_resep", "Resep / Bahan Baku", "Inventaris", "Potong bahan saat jual"),
-    BATCH_EXPIRED("inv_batch_expired", "Batch & Expired", "Inventaris", "Track batch & expired"),
-    SUPPLIER("inv_supplier", "Database Supplier", "Inventaris", "Kelola supplier"),
     PURCHASE_ORDER("inv_purchase_order", "Purchase Order", "Inventaris", "Order ke supplier"),
-    MULTI_GUDANG("inv_multi_gudang", "Multi Gudang", "Inventaris", "Stok di beberapa lokasi"),
 
     // Laporan
     LAPORAN_HARIAN("rep_harian", "Laporan Harian", "Laporan", "Ringkasan penjualan"),
@@ -169,21 +180,22 @@ enum class FeatureKey(
 val BusinessType.defaultFeatures: Set<FeatureKey>
     get() = when (this) {
         BusinessType.WARUNG -> setOf(
+            FeatureKey.OPEN_BILL, FeatureKey.DISKON, FeatureKey.VOID_REFUND,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT
         )
         BusinessType.RETAIL -> setOf(
             FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
-            FeatureKey.LOW_STOCK_ALERT, FeatureKey.BATCH_EXPIRED, FeatureKey.SUPPLIER,
-            FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER, FeatureKey.DISKON,
-            FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER, FeatureKey.LAPORAN_HARIAN,
-            FeatureKey.LABA_PER_PRODUK, FeatureKey.PRINTER_BT, FeatureKey.EXPORT_EXCEL
+            FeatureKey.LOW_STOCK_ALERT, FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
+            FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.PRINTER_BT,
+            FeatureKey.EXPORT_EXCEL
         )
         BusinessType.FNB -> setOf(
             FeatureKey.NOMOR_MEJA, FeatureKey.KITCHEN_PRINT, FeatureKey.MODIFIER,
             FeatureKey.SPLIT_BILL, FeatureKey.MERGE_BILL, FeatureKey.OPEN_BILL,
-            FeatureKey.DISKON, FeatureKey.SERVICE_CHARGE, FeatureKey.TIP,
-            FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER, FeatureKey.STATUS_DAPUR,
-            FeatureKey.RESEP, FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
+            FeatureKey.DISKON, FeatureKey.PAJAK, FeatureKey.VOID_REFUND,
+            FeatureKey.HOLD_ORDER, FeatureKey.STATUS_DAPUR, FeatureKey.RESEP,
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
             FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR
         )
         BusinessType.LAUNDRY -> setOf(
@@ -191,9 +203,68 @@ val BusinessType.defaultFeatures: Set<FeatureKey>
             FeatureKey.DP_PEMBAYARAN, FeatureKey.PICKUP_DELIVERY, FeatureKey.OPEN_BILL,
             FeatureKey.WHATSAPP_INTENT, FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT
         )
+        BusinessType.TOKO_BANGUNAN -> setOf(
+            FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
+            FeatureKey.LOW_STOCK_ALERT, FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
+            FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
+            FeatureKey.OPEN_BILL, FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
+            FeatureKey.EXPORT_EXCEL, FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR
+        )
         BusinessType.JASA -> setOf(
             FeatureKey.JADWAL_SERVIS, FeatureKey.REMINDER, FeatureKey.WHATSAPP_INTENT,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT
+        )
+        BusinessType.CUSTOM -> emptySet()
+    }
+
+// ═══════ PERMISSION KEYS (izin granular per-user) ═══════
+enum class PermissionKey(
+    val key: String, val label: String, val kategori: String, val deskripsi: String = ""
+) {
+    LIHAT_DASHBOARD("perm_dashboard", "Lihat Dashboard", "Umum", "Akses ringkasan penjualan"),
+    LIHAT_RIWAYAT("perm_riwayat", "Lihat Riwayat", "Umum", "Lihat transaksi masa lalu"),
+    BUKA_SETELAN("perm_setelan", "Buka Setelan", "Umum", "Akses menu pengaturan"),
+
+    KELOLA_MENU("perm_menu", "Kelola Menu", "Menu", "Tambah/edit/hapus menu"),
+    UBAH_HARGA("perm_harga", "Ubah Harga", "Menu", "Ubah harga produk"),
+
+    JUAL("perm_jual", "Jual / Buat Order", "POS", "Buat transaksi baru"),
+    DISKON("perm_diskon", "Beri Diskon", "POS", "Beri diskon ke pelanggan"),
+    VOID_REFUND("perm_void", "Void / Refund", "POS", "Batalkan atau refund transaksi"),
+    OPEN_BILL("perm_open_bill", "Open Bill", "POS", "Simpan order tanpa bayar"),
+
+    STOCK_OPNAME("perm_opname", "Stock Opname", "Inventaris", "Sesuaikan stok fisik"),
+    KELOLA_STOK("perm_stok", "Kelola Stok", "Inventaris", "Tambah/kurangi stok manual"),
+
+    LIHAT_LAPORAN("perm_laporan", "Lihat Laporan", "Laporan", "Akses semua laporan"),
+    EXPORT_DATA("perm_export", "Export Data", "Laporan", "Export ke Excel/PDF"),
+
+    KELOLA_USER("perm_user", "Kelola Pengguna", "Admin", "Tambah/edit user & izin"),
+    KELOLA_FITUR("perm_fitur", "Kelola Fitur", "Admin", "Aktif/matikan fitur"),
+    PROFIL_TOKO("perm_profil", "Profil Toko", "Admin", "Ubah info toko"),
+    BACKUP_RESTORE("perm_backup", "Backup / Restore", "Admin", "Backup & pulihkan data"),
+    AUDIT_LOG("perm_audit", "Lihat Audit Log", "Admin", "Riwayat aktivitas");
+
+    companion object {
+        fun fromKey(k: String) = values().firstOrNull { it.key == k }
+        fun byKategori(): Map<String, List<PermissionKey>> = values().groupBy { it.kategori }
+    }
+}
+
+// Preset permission per role
+val UserRole.defaultPermissions: Set<PermissionKey>
+    get() = when (this) {
+        UserRole.OWNER -> PermissionKey.values().toSet()
+        UserRole.SUPERVISOR -> setOf(
+            PermissionKey.LIHAT_DASHBOARD, PermissionKey.LIHAT_RIWAYAT, PermissionKey.BUKA_SETELAN,
+            PermissionKey.KELOLA_MENU, PermissionKey.UBAH_HARGA,
+            PermissionKey.JUAL, PermissionKey.DISKON, PermissionKey.VOID_REFUND,
+            PermissionKey.OPEN_BILL, PermissionKey.STOCK_OPNAME, PermissionKey.KELOLA_STOK,
+            PermissionKey.LIHAT_LAPORAN, PermissionKey.EXPORT_DATA
+        )
+        UserRole.KASIR -> setOf(
+            PermissionKey.LIHAT_RIWAYAT,
+            PermissionKey.JUAL, PermissionKey.OPEN_BILL
         )
     }
 
@@ -206,21 +277,37 @@ object FeatureManager {
     fun update(features: Set<FeatureKey>) { _enabled.value = features }
 }
 
-// ═══════ TEMA ═══════
+// ═══════ THEME MANAGER ═══════
+object ThemeManager {
+    var mode by mutableStateOf(ThemeMode.SYSTEM)
+        private set
+
+    fun update(m: ThemeMode) { mode = m }
+}
+
+// ═══════ TEMA COMPOSABLE ═══════
 @Composable
 fun IyonzTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = when (ThemeManager.mode) {
+        ThemeMode.SYSTEM -> isSystemInDarkTheme()
+        ThemeMode.LIGHT -> false
+        ThemeMode.DARK -> true
+    },
     content: @Composable () -> Unit
 ) {
     val colors = if (darkTheme) {
         darkColorScheme(
             primary = BRAND, onPrimary = Color.White,
-            secondary = BRAND_DARK, surfaceVariant = Color(0xFF2A2A2A)
+            secondary = BRAND_DARK,
+            surfaceVariant = Color(0xFF2A2A2A),
+            background = Color(0xFF121212),
+            surface = Color(0xFF1E1E1E)
         )
     } else {
         lightColorScheme(
             primary = BRAND, onPrimary = Color.White,
-            secondary = BRAND_DARK, surfaceVariant = Color(0xFFF5F5F5)
+            secondary = BRAND_DARK,
+            surfaceVariant = Color(0xFFF5F5F5)
         )
     }
     MaterialTheme(colorScheme = colors, content = content)
