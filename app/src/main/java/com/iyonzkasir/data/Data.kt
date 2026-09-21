@@ -81,6 +81,8 @@ data class Order(
     val diskonTipe: String = "NONE",
     val diskonValue: Int = 0,
     val diskonAmount: Int = 0,
+    val voucherKode: String = "",
+    val voucherAmount: Int = 0,
     val pajakPersen: Int = 0,
     val pajakAmount: Int = 0,
     val total: Int = 0,
@@ -92,7 +94,10 @@ data class Order(
     val kasirId: String = "",
     val kasirNama: String = "",
     val voidReason: String = "",
-    val shiftId: Long = 0
+    val shiftId: Long = 0,
+    val memberId: Long = 0,
+    val memberNama: String = "",
+    val poinDidapat: Int = 0
 )
 
 @Entity(tableName = "order_items")
@@ -126,23 +131,68 @@ data class Shift(
     val status: String = "OPEN"
 )
 
-// ═══════ DATA CLASS LAPORAN ═══════
+@Entity(tableName = "members")
+data class Member(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val nama: String = "",
+    val telepon: String = "",
+    val email: String = "",
+    val alamat: String = "",
+    val poin: Int = 0,
+    val totalBelanja: Int = 0,
+    val tier: String = MemberTier.BASIC.id,
+    val hutang: Int = 0,
+    val aktif: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis(),
+    val catatan: String = ""
+)
+
+@Entity(tableName = "vouchers")
+data class Voucher(
+    @PrimaryKey val kode: String = "",
+    val nama: String = "",
+    val tipe: String = "NOMINAL", // NOMINAL | PERSEN
+    val value: Int = 0,
+    val minBelanja: Int = 0,
+    val maxDiskon: Int = 0,
+    val kuota: Int = 0,
+    val terpakai: Int = 0,
+    val tglMulai: Long = 0,
+    val tglAkhir: Long = 0,
+    val aktif: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "member_transactions")
+data class MemberTransaction(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val memberId: Long = 0,
+    val orderId: Long = 0,
+    val tipe: String = "POIN_EARN", // POIN_EARN | POIN_REDEEM | HUTANG_ADD | HUTANG_PAY | ADJUST
+    val poinDelta: Int = 0,
+    val hutangDelta: Int = 0,
+    val saldoPoinSetelah: Int = 0,
+    val saldoHutangSetelah: Int = 0,
+    val keterangan: String = "",
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+// ═══════ LAPORAN DATA CLASS ═══════
 
 data class LabaProduk(
-    val menuId: Long,
-    val namaMenu: String,
-    val totalQty: Int,
-    val totalOmzet: Int,
-    val totalHpp: Int
+    val menuId: Long, val namaMenu: String,
+    val totalQty: Int, val totalOmzet: Int, val totalHpp: Int
 ) {
     val laba: Int get() = totalOmzet - totalHpp
     val marginPersen: Int get() = if (totalOmzet > 0) laba * 100 / totalOmzet else 0
 }
 
 data class HariPenjualan(
-    val label: String,
-    val omzet: Int,
-    val transaksi: Int
+    val label: String, val omzet: Int, val transaksi: Int
+)
+
+data class MemberStat(
+    val memberId: Long, val totalOrder: Int, val totalOmzet: Int
 )
 
 // ═══════ DAOs ═══════
@@ -159,8 +209,6 @@ interface UserDao {
     suspend fun getByUsername(username: String): User?
     @Query("SELECT COUNT(*) FROM users WHERE role = 'owner'")
     suspend fun ownerCount(): Int
-    @Query("SELECT COUNT(*) FROM users")
-    suspend fun totalCount(): Int
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(user: User)
     @Delete
@@ -282,10 +330,8 @@ interface OrderDao {
     suspend fun sumPajakByShift(shiftId: Long): Int
 
     @Query("""
-        SELECT oi.menuId AS menuId,
-               oi.namaMenu AS namaMenu,
-               SUM(oi.qty) AS totalQty,
-               SUM(oi.subtotal) AS totalOmzet,
+        SELECT oi.menuId AS menuId, oi.namaMenu AS namaMenu,
+               SUM(oi.qty) AS totalQty, SUM(oi.subtotal) AS totalOmzet,
                SUM(oi.qty * COALESCE(m.hargaBeli, 0)) AS totalHpp
         FROM order_items oi
         JOIN orders o ON o.id = oi.orderId
@@ -314,6 +360,60 @@ interface ShiftDao {
     suspend fun insert(shift: Shift): Long
     @Update
     suspend fun update(shift: Shift)
+}
+
+@Dao
+interface MemberDao {
+    @Query("SELECT * FROM members ORDER BY nama ASC")
+    fun observeAll(): Flow<List<Member>>
+    @Query("SELECT * FROM members WHERE aktif = 1 ORDER BY nama ASC")
+    fun observeActive(): Flow<List<Member>>
+    @Query("SELECT * FROM members WHERE id = :id")
+    suspend fun getById(id: Long): Member?
+    @Query("SELECT * FROM members WHERE telepon = :telp LIMIT 1")
+    suspend fun getByTelepon(telp: String): Member?
+    @Query("SELECT * FROM members WHERE nama LIKE :q OR telepon LIKE :q ORDER BY nama ASC LIMIT 30")
+    suspend fun search(q: String): List<Member>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(m: Member): Long
+    @Update
+    suspend fun update(m: Member)
+    @Delete
+    suspend fun delete(m: Member)
+    @Query("SELECT COUNT(*) FROM members WHERE aktif = 1")
+    fun countActive(): Flow<Int>
+}
+
+@Dao
+interface VoucherDao {
+    @Query("SELECT * FROM vouchers ORDER BY createdAt DESC")
+    fun observeAll(): Flow<List<Voucher>>
+    @Query("SELECT * FROM vouchers WHERE kode = :kode LIMIT 1")
+    suspend fun getByKode(kode: String): Voucher?
+    @Query("SELECT * FROM vouchers WHERE aktif = 1 AND (tglMulai = 0 OR tglMulai <= :now) AND (tglAkhir = 0 OR tglAkhir >= :now) ORDER BY createdAt DESC")
+    suspend fun getActive(now: Long = System.currentTimeMillis()): List<Voucher>
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(v: Voucher)
+    @Update
+    suspend fun update(v: Voucher)
+    @Delete
+    suspend fun delete(v: Voucher)
+}
+
+@Dao
+interface MemberTxDao {
+    @Query("SELECT * FROM member_transactions WHERE memberId = :memberId ORDER BY timestamp DESC LIMIT 200")
+    fun observeForMember(memberId: Long): Flow<List<MemberTransaction>>
+    @Insert
+    suspend fun insert(tx: MemberTransaction)
+    @Query("SELECT * FROM orders WHERE memberId = :memberId AND status = 'PAID' ORDER BY timestamp DESC LIMIT 50")
+    suspend fun ordersForMember(memberId: Long): List<Order>
+    @Query("""
+        SELECT o.memberId AS memberId, COUNT(o.id) AS totalOrder, COALESCE(SUM(o.total), 0) AS totalOmzet
+        FROM orders o WHERE o.memberId = :memberId AND o.status = 'PAID'
+        GROUP BY o.memberId
+    """)
+    suspend fun statForMember(memberId: Long): MemberStat?
 }
 
 // ═══════ MIGRATIONS ═══════
@@ -376,15 +476,78 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
     }
 }
 
+val MIGRATION_6_7 = object : Migration(6, 7) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Orders tambahan
+        db.execSQL("ALTER TABLE orders ADD COLUMN voucherKode TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE orders ADD COLUMN voucherAmount INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE orders ADD COLUMN memberId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE orders ADD COLUMN memberNama TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE orders ADD COLUMN poinDidapat INTEGER NOT NULL DEFAULT 0")
+
+        // Members
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `members` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `nama` TEXT NOT NULL DEFAULT '',
+                `telepon` TEXT NOT NULL DEFAULT '',
+                `email` TEXT NOT NULL DEFAULT '',
+                `alamat` TEXT NOT NULL DEFAULT '',
+                `poin` INTEGER NOT NULL DEFAULT 0,
+                `totalBelanja` INTEGER NOT NULL DEFAULT 0,
+                `tier` TEXT NOT NULL DEFAULT 'BASIC',
+                `hutang` INTEGER NOT NULL DEFAULT 0,
+                `aktif` INTEGER NOT NULL DEFAULT 1,
+                `createdAt` INTEGER NOT NULL DEFAULT 0,
+                `catatan` TEXT NOT NULL DEFAULT ''
+            )
+        """.trimIndent())
+
+        // Vouchers
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `vouchers` (
+                `kode` TEXT PRIMARY KEY NOT NULL,
+                `nama` TEXT NOT NULL DEFAULT '',
+                `tipe` TEXT NOT NULL DEFAULT 'NOMINAL',
+                `value` INTEGER NOT NULL DEFAULT 0,
+                `minBelanja` INTEGER NOT NULL DEFAULT 0,
+                `maxDiskon` INTEGER NOT NULL DEFAULT 0,
+                `kuota` INTEGER NOT NULL DEFAULT 0,
+                `terpakai` INTEGER NOT NULL DEFAULT 0,
+                `tglMulai` INTEGER NOT NULL DEFAULT 0,
+                `tglAkhir` INTEGER NOT NULL DEFAULT 0,
+                `aktif` INTEGER NOT NULL DEFAULT 1,
+                `createdAt` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+
+        // Member transactions
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `member_transactions` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `memberId` INTEGER NOT NULL DEFAULT 0,
+                `orderId` INTEGER NOT NULL DEFAULT 0,
+                `tipe` TEXT NOT NULL DEFAULT 'POIN_EARN',
+                `poinDelta` INTEGER NOT NULL DEFAULT 0,
+                `hutangDelta` INTEGER NOT NULL DEFAULT 0,
+                `saldoPoinSetelah` INTEGER NOT NULL DEFAULT 0,
+                `saldoHutangSetelah` INTEGER NOT NULL DEFAULT 0,
+                `keterangan` TEXT NOT NULL DEFAULT '',
+                `timestamp` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+    }
+}
+
 // ═══════ DATABASE ═══════
 
 @Database(
     entities = [
         User::class, UserPermission::class, AuditLog::class, AppSetting::class,
         FeatureToggleEntity::class, MenuItem::class, Order::class, OrderItem::class,
-        Shift::class
+        Shift::class, Member::class, Voucher::class, MemberTransaction::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -396,6 +559,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun menuDao(): MenuDao
     abstract fun orderDao(): OrderDao
     abstract fun shiftDao(): ShiftDao
+    abstract fun memberDao(): MemberDao
+    abstract fun voucherDao(): VoucherDao
+    abstract fun memberTxDao(): MemberTxDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -405,9 +571,10 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "iyonzkasir.db"
-                ).addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
-                    .build()
-                    .also { INSTANCE = it }
+                ).addMigrations(
+                    MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
+                    MIGRATION_5_6, MIGRATION_6_7
+                ).build().also { INSTANCE = it }
             }
     }
 }
@@ -429,7 +596,6 @@ class UserRepository(
         permDao.clearForUser(user.id); dao.delete(user)
     }
     suspend fun ownerCount() = dao.ownerCount()
-    suspend fun totalCount() = dao.totalCount()
     suspend fun updateLastLogin(id: String) = dao.updateLastLogin(id)
 
     fun observePermissions(userId: String) = permDao.observeForUser(userId)
@@ -477,7 +643,7 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getThemeMode() = ThemeMode.fromId(get(KEY_TEMA_MODE, "system"))
     suspend fun setThemeMode(m: ThemeMode) = set(KEY_TEMA_MODE, m.id)
 
-    // ── Printer ──
+    // Printer
     suspend fun getPrinterMac() = get(KEY_PRINTER_MAC, "")
     suspend fun setPrinterMac(mac: String) = set(KEY_PRINTER_MAC, mac)
     suspend fun getPrinterNama() = get(KEY_PRINTER_NAMA, "")
@@ -487,14 +653,12 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun isAutoPrint() = get(KEY_AUTO_PRINT, "0") == "1"
     suspend fun setAutoPrint(v: Boolean) = set(KEY_AUTO_PRINT, if (v) "1" else "0")
 
-    // ── Backup ──
+    // Backup
     suspend fun getLastBackupTimestamp() =
         get(KEY_LAST_BACKUP, "0").toLongOrNull() ?: 0L
-    suspend fun setLastBackupTimestamp(ts: Long) =
-        set(KEY_LAST_BACKUP, ts.toString())
+    suspend fun setLastBackupTimestamp(ts: Long) = set(KEY_LAST_BACKUP, ts.toString())
     suspend fun getLastBackupName() = get(KEY_LAST_BACKUP_NAME, "")
-    suspend fun setLastBackupName(name: String) =
-        set(KEY_LAST_BACKUP_NAME, name)
+    suspend fun setLastBackupName(name: String) = set(KEY_LAST_BACKUP_NAME, name)
 
     companion object {
         const val KEY_NAMA_TOKO = "toko_nama"
@@ -621,5 +785,128 @@ class ShiftRepository(
         )
         shiftDao.update(updated)
         return updated
+    }
+}
+
+class CrmRepository(
+    private val memberDao: MemberDao,
+    private val voucherDao: VoucherDao,
+    private val txDao: MemberTxDao
+) {
+    val members: Flow<List<Member>> = memberDao.observeAll()
+    val activeMembers: Flow<List<Member>> = memberDao.observeActive()
+    val vouchers: Flow<List<Voucher>> = voucherDao.observeAll()
+    val memberCount: Flow<Int> = memberDao.countActive()
+
+    suspend fun getMember(id: Long) = memberDao.getById(id)
+    suspend fun findMemberByTelepon(telp: String) = memberDao.getByTelepon(telp)
+    suspend fun searchMember(q: String) = memberDao.search("%$q%")
+    suspend fun saveMember(m: Member): Long = memberDao.upsert(m)
+    suspend fun deleteMember(m: Member) = memberDao.delete(m)
+
+    suspend fun getVoucher(kode: String) = voucherDao.getByKode(kode)
+    suspend fun getActiveVouchers() = voucherDao.getActive()
+    suspend fun saveVoucher(v: Voucher) = voucherDao.upsert(v)
+    suspend fun deleteVoucher(v: Voucher) = voucherDao.delete(v)
+
+    fun observeMemberTx(memberId: Long) = txDao.observeForMember(memberId)
+    suspend fun statMember(memberId: Long) = txDao.statForMember(memberId)
+    suspend fun ordersForMember(memberId: Long) = txDao.ordersForMember(memberId)
+
+    /** Proses transaksi order: tambah poin, tambah hutang kalau metode HUTANG. */
+    suspend fun processOrder(memberId: Long, order: Order) {
+        val m = memberDao.getById(memberId) ?: return
+        var newPoin = m.poin
+        var newHutang = m.hutang
+        var newTotalBelanja = m.totalBelanja
+
+        // 1. Poin earn (dari total)
+        val poinDidapat = LoyaltyConfig.hitungPoinDidapat(order.total)
+        if (poinDidapat > 0) {
+            newPoin += poinDidapat
+            txDao.insert(MemberTransaction(
+                memberId = memberId, orderId = order.id,
+                tipe = "POIN_EARN",
+                poinDelta = poinDidapat,
+                saldoPoinSetelah = newPoin,
+                saldoHutangSetelah = newHutang,
+                keterangan = "Poin dari order #${order.id}"
+            ))
+        }
+
+        // 2. Hutang
+        if (order.metodeBayar == PaymentMethod.HUTANG.id) {
+            newHutang += order.total
+            txDao.insert(MemberTransaction(
+                memberId = memberId, orderId = order.id,
+                tipe = "HUTANG_ADD",
+                hutangDelta = order.total,
+                saldoPoinSetelah = newPoin,
+                saldoHutangSetelah = newHutang,
+                keterangan = "Hutang dari order #${order.id}"
+            ))
+        }
+
+        // 3. Total belanja
+        newTotalBelanja += order.total
+        val newTier = MemberTier.fromTotalBelanja(newTotalBelanja)
+
+        memberDao.update(m.copy(
+            poin = newPoin, hutang = newHutang,
+            totalBelanja = newTotalBelanja, tier = newTier.id
+        ))
+    }
+
+    /** Bayar hutang member. */
+    suspend fun bayarHutang(memberId: Long, jumlah: Int, keterangan: String = "") {
+        val m = memberDao.getById(memberId) ?: return
+        if (jumlah <= 0) return
+        val bayar = jumlah.coerceAtMost(m.hutang)
+        val newHutang = m.hutang - bayar
+        txDao.insert(MemberTransaction(
+            memberId = memberId, tipe = "HUTANG_PAY",
+            hutangDelta = -bayar,
+            saldoPoinSetelah = m.poin,
+            saldoHutangSetelah = newHutang,
+            keterangan = keterangan.ifBlank { "Bayar hutang" }
+        ))
+        memberDao.update(m.copy(hutang = newHutang))
+    }
+
+    /** Redeem poin (tukar jadi diskon). */
+    suspend fun redeemPoin(memberId: Long, poin: Int): Int {
+        val m = memberDao.getById(memberId) ?: return 0
+        if (poin <= 0 || poin > m.poin) return 0
+        val rupiah = LoyaltyConfig.poinKeRupiah(poin)
+        val newPoin = m.poin - poin
+        txDao.insert(MemberTransaction(
+            memberId = memberId, tipe = "POIN_REDEEM",
+            poinDelta = -poin,
+            saldoPoinSetelah = newPoin,
+            saldoHutangSetelah = m.hutang,
+            keterangan = "Tukar $poin poin = ${rupiah} rupiah"
+        ))
+        memberDao.update(m.copy(poin = newPoin))
+        return rupiah
+    }
+
+    /** Update member manual (adjust poin/hutang). */
+    suspend fun adjust(memberId: Long, poinDelta: Int, hutangDelta: Int, ket: String) {
+        val m = memberDao.getById(memberId) ?: return
+        val newPoin = (m.poin + poinDelta).coerceAtLeast(0)
+        val newHutang = (m.hutang + hutangDelta).coerceAtLeast(0)
+        txDao.insert(MemberTransaction(
+            memberId = memberId, tipe = "ADJUST",
+            poinDelta = poinDelta, hutangDelta = hutangDelta,
+            saldoPoinSetelah = newPoin, saldoHutangSetelah = newHutang,
+            keterangan = ket
+        ))
+        memberDao.update(m.copy(poin = newPoin, hutang = newHutang))
+    }
+
+    /** Tandai voucher terpakai. */
+    suspend fun markVoucherUsed(kode: String) {
+        val v = voucherDao.getByKode(kode) ?: return
+        voucherDao.update(v.copy(terpakai = v.terpakai + 1))
     }
 }
