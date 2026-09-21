@@ -222,8 +222,7 @@ class PosVMFactory(private val repo: PosRepository) : ViewModelProvider.Factory 
 }
 
 // ═══════════════════════════════════════════════════════════
-// ROUTES — semua pakai Activity sebagai ViewModelStoreOwner
-// supaya 1 instance KasirViewModel dipakai bareng-bareng
+// ROUTES — pakai Activity sebagai owner → 1 VM shared
 // ═══════════════════════════════════════════════════════════
 
 @Composable
@@ -303,7 +302,7 @@ fun DashboardRoute(app: IyonzApp) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// POS SCREEN (adaptive)
+// POS SCREEN
 // ═══════════════════════════════════════════════════════════
 @Composable
 fun PosScreen(vm: KasirViewModel, onOpenKeranjang: () -> Unit, onBayar: () -> Unit) {
@@ -380,33 +379,61 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            OrderMetaBar(vm)
+            // Order meta bar — hanya tampil sesuai fitur
+            if (FeatureManager.isEnabled(FeatureKey.NOMOR_MEJA)) {
+                OrderMetaBar(vm)
+            }
+
+            // Search box — diperkecil
             OutlinedTextField(
                 value = vm.searchQuery, onValueChange = { vm.searchQuery = it },
-                placeholder = { Text("Cari menu") },
-                leadingIcon = { Icon(Icons.Default.Search, null) },
+                placeholder = { Text("Cari menu", style = MaterialTheme.typography.bodySmall) },
+                leadingIcon = {
+                    Icon(Icons.Default.Search, null, Modifier.size(18.dp))
+                },
+                trailingIcon = {
+                    if (vm.searchQuery.isNotEmpty()) {
+                        IconButton(onClick = { vm.searchQuery = "" },
+                            modifier = Modifier.size(28.dp)) {
+                            Icon(Icons.Default.Close, null, Modifier.size(16.dp))
+                        }
+                    }
+                },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                textStyle = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .height(52.dp)
             )
-            LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(kategoriList.size) { i ->
-                    val k = kategoriList[i]
-                    FilterChip(selected = k == vm.kategoriFilter,
-                        onClick = { vm.kategoriFilter = k },
-                        label = { Text(k ?: "Semua") })
+
+            // Kategori
+            if (kategoriList.size > 1) {
+                LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(kategoriList.size) { i ->
+                        val k = kategoriList[i]
+                        FilterChip(
+                            selected = k == vm.kategoriFilter,
+                            onClick = { vm.kategoriFilter = k },
+                            label = { Text(k ?: "Semua",
+                                style = MaterialTheme.typography.bodySmall) },
+                            modifier = Modifier.height(32.dp)
+                        )
+                    }
                 }
             }
+
             if (filtered.isEmpty()) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("Menu tidak ditemukan")
+                    Text(if (menu.isEmpty()) "Belum ada menu" else "Menu tidak ditemukan")
                 }
             } else {
                 val kolom = if (isTablet) 3 else 2
                 LazyVerticalGrid(columns = GridCells.Fixed(kolom),
                     contentPadding = PaddingValues(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(filtered, key = { it.id }) { m ->
                         MenuCard(m, enabled = m.tersedia) { vm.add(m) }
                     }
@@ -424,13 +451,16 @@ private fun OrderMetaBar(vm: KasirViewModel) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically) {
         AssistChip(onClick = { showDialog = true },
-            leadingIcon = { Icon(Icons.Default.TableRestaurant, null, Modifier.size(18.dp)) },
-            label = { Text(if (vm.nomorMeja.isBlank()) "Pilih Meja" else "Meja ${vm.nomorMeja}") })
+            leadingIcon = { Icon(Icons.Default.TableRestaurant, null, Modifier.size(16.dp)) },
+            label = { Text(if (vm.nomorMeja.isBlank()) "Pilih Meja" else "Meja ${vm.nomorMeja}",
+                style = MaterialTheme.typography.bodySmall) },
+            modifier = Modifier.height(32.dp))
         LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             items(TipeOrder.values().toList()) { t ->
                 FilterChip(selected = vm.tipeOrder == t.id,
                     onClick = { vm.tipeOrder = t.id },
-                    label = { Text(t.label, style = MaterialTheme.typography.bodySmall) })
+                    label = { Text(t.label, style = MaterialTheme.typography.bodySmall) },
+                    modifier = Modifier.height(32.dp))
             }
         }
     }
@@ -469,12 +499,12 @@ private fun OrderMetaBar(vm: KasirViewModel) {
 @Composable
 private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth().height(170.dp)
+        modifier = Modifier.fillMaxWidth().height(160.dp)
             .clickable(enabled = enabled, onClick = onClick),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column {
-            Box(Modifier.fillMaxWidth().height(100.dp)
+            Box(Modifier.fillMaxWidth().height(96.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant)) {
                 m.fotoUri?.let { uri ->
                     AsyncImage(model = uri, contentDescription = m.nama,
@@ -508,6 +538,9 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
     val cart by vm.cart.collectAsState()
     val total by vm.total.collectAsState()
     var noteFor by remember { mutableStateOf<CartLine?>(null) }
+    val modifierEnabled = FeatureManager.isEnabled(FeatureKey.MODIFIER)
+    val openBillEnabled = FeatureManager.isEnabled(FeatureKey.OPEN_BILL)
+            && Session.can(PermissionKey.OPEN_BILL)
 
     Column(modifier.fillMaxHeight().background(MaterialTheme.colorScheme.surfaceVariant)) {
         Surface(color = MaterialTheme.colorScheme.surfaceVariant) {
@@ -516,8 +549,11 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                     fontWeight = FontWeight.Bold)
                 Text(
                     buildString {
-                        append(if (vm.nomorMeja.isBlank()) "Tanpa meja" else "Meja ${vm.nomorMeja}")
-                        append(" • ")
+                        if (FeatureManager.isEnabled(FeatureKey.NOMOR_MEJA)) {
+                            append(if (vm.nomorMeja.isBlank()) "Tanpa meja"
+                            else "Meja ${vm.nomorMeja}")
+                            append(" • ")
+                        }
                         append(TipeOrder.fromId(vm.tipeOrder).label)
                         if (vm.namaPelanggan.isNotBlank()) {
                             append(" • "); append(vm.namaPelanggan)
@@ -547,7 +583,8 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                         onAdd = { vm.add(line.menu, line.catatan) },
                         onDecrease = { vm.decrease(line.key) },
                         onRemove = { vm.remove(line.key) },
-                        onEditNote = { noteFor = line })
+                        onEditNote = { noteFor = line },
+                        showNote = modifierEnabled)
                 }
             }
         }
@@ -563,9 +600,13 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                 }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { vm.simpanOpenBill { } },
-                        enabled = cart.isNotEmpty(),
-                        modifier = Modifier.weight(1f)) { Text("Open Bill") }
+                    if (openBillEnabled) {
+                        OutlinedButton(onClick = { vm.simpanOpenBill { } },
+                            enabled = cart.isNotEmpty(),
+                            modifier = Modifier.weight(1f)) {
+                            Text("Open Bill", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                     Button(onClick = onBayar, enabled = cart.isNotEmpty(),
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = BRAND)) {
@@ -593,7 +634,7 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
 @Composable
 private fun CartLineItem(
     line: CartLine, onAdd: () -> Unit, onDecrease: () -> Unit,
-    onRemove: () -> Unit, onEditNote: () -> Unit
+    onRemove: () -> Unit, onEditNote: () -> Unit, showNote: Boolean
 ) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
         Column(Modifier.padding(10.dp)) {
@@ -605,8 +646,9 @@ private fun CartLineItem(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                IconButton(onClick = onRemove) {
-                    Icon(Icons.Default.Close, null, Modifier.size(18.dp))
+                IconButton(onClick = onRemove,
+                    modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Close, null, Modifier.size(16.dp))
                 }
             }
             if (line.catatan.isNotBlank()) {
@@ -617,21 +659,22 @@ private fun CartLineItem(
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(6.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onDecrease, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Remove, null, Modifier.size(18.dp))
+                IconButton(onClick = onDecrease, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Remove, null, Modifier.size(16.dp))
                 }
                 Text(line.qty.toString(), fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 12.dp))
-                IconButton(onClick = onAdd, modifier = Modifier.size(32.dp)) {
-                    Icon(Icons.Default.Add, null, Modifier.size(18.dp))
+                    modifier = Modifier.padding(horizontal = 10.dp))
+                IconButton(onClick = onAdd, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Default.Add, null, Modifier.size(16.dp))
                 }
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onEditNote) {
-                    Icon(Icons.Default.Edit, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("Catatan")
+                if (showNote) {
+                    IconButton(onClick = onEditNote, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Edit, null, Modifier.size(16.dp),
+                            tint = BRAND)
+                    }
                 }
                 Text(line.subtotal.rupiah(), fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.bodyMedium)
@@ -674,9 +717,6 @@ private fun NoteDialog(
     )
 }
 
-// ═══════════════════════════════════════════════════════════
-// KERANJANG (mobile)
-// ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun KeranjangScreen(vm: KasirViewModel, onBack: () -> Unit, onBayar: () -> Unit) {
@@ -739,7 +779,7 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: () -> Unit) {
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(PaymentMethod.values().toList()) { m ->
                     FilterChip(selected = metode == m.id, onClick = { metode = m.id },
-                        label = { Text(m.label) })
+                        label = { Text(m.label, style = MaterialTheme.typography.bodySmall) })
                 }
             }
 
@@ -849,15 +889,19 @@ fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
 @Composable
 fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
     val menu by vm.menu.collectAsState()
+    val canEdit = Session.can(PermissionKey.KELOLA_MENU)
+
     Scaffold(
         topBar = { TopAppBar(title = { Text("Kelola Menu") }) },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = { onEdit(null) },
-                icon = { Icon(Icons.Default.Add, null) },
-                text = { Text("Menu baru") },
-                containerColor = BRAND
-            )
+            if (canEdit) {
+                ExtendedFloatingActionButton(
+                    onClick = { onEdit(null) },
+                    icon = { Icon(Icons.Default.Add, null) },
+                    text = { Text("Menu baru") },
+                    containerColor = BRAND
+                )
+            }
         }
     ) { pad ->
         if (menu.isEmpty()) {
@@ -869,8 +913,11 @@ fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
                 contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, 100.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(menu, key = { it.id }) { m ->
-                    MenuRow(m, onToggle = { vm.toggle(m) },
-                        onEdit = { onEdit(m.id) }, onDelete = { vm.delete(m) })
+                    MenuRow(m,
+                        onToggle = { vm.toggle(m) },
+                        onEdit = { if (canEdit) onEdit(m.id) },
+                        onDelete = { if (canEdit) vm.delete(m) },
+                        canEdit = canEdit)
                 }
             }
         }
@@ -879,7 +926,8 @@ fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
 
 @Composable
 private fun MenuRow(
-    m: MenuItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit
+    m: MenuItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
+    canEdit: Boolean
 ) {
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -899,9 +947,12 @@ private fun MenuRow(
                 Text(m.kategori, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(checked = m.tersedia, onCheckedChange = { onToggle() })
-            IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, null) }
-            IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null) }
+            Switch(checked = m.tersedia, onCheckedChange = { onToggle() },
+                enabled = canEdit)
+            if (canEdit) {
+                IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, null) }
+                IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null) }
+            }
         }
     }
 }
