@@ -35,6 +35,9 @@ class IyonzApp : Application() {
     val shiftRepo: ShiftRepository by lazy {
         ShiftRepository(database.shiftDao(), database.orderDao())
     }
+    val crmRepo: CrmRepository by lazy {
+        CrmRepository(database.memberDao(), database.voucherDao(), database.memberTxDao())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -92,6 +95,7 @@ object Routes {
     const val PRINTER = "printer"
     const val LAPORAN = "laporan"
     const val BACKUP = "backup"
+    const val CRM = "crm"
     const val TENTANG = "tentang"
 }
 
@@ -113,6 +117,8 @@ fun AppRoot(app: IyonzApp) {
     LaunchedEffect(Unit) {
         ThemeManager.update(app.settingRepo.getThemeMode())
         app.featureRepo.ensureInitialized()
+        BackupScheduler.scheduleDaily(app)
+        BackupNotifier.maybeRemind(app, app.settingRepo)
     }
 
     NavHost(navController = nav, startDestination = Routes.SPLASH) {
@@ -160,6 +166,7 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.PRINTER) { PrinterRoute(app, nav) }
         composable(Routes.LAPORAN) { LaporanRoute(app, nav) }
         composable(Routes.BACKUP) { BackupRoute(app, nav) }
+        composable(Routes.CRM) { CrmRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
