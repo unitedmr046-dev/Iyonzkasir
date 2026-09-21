@@ -18,7 +18,6 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.iyonzkasir.data.*
 import com.iyonzkasir.ui.*
-import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
 // APPLICATION
@@ -28,14 +27,13 @@ class IyonzApp : Application() {
     val userRepo: UserRepository by lazy {
         UserRepository(database.userDao(), database.permissionDao(), database.auditDao())
     }
-    val settingRepo: SettingRepository by lazy {
-        SettingRepository(database.settingDao())
-    }
-    val featureRepo: FeatureRepository by lazy {
-        FeatureRepository(database.featureDao())
-    }
+    val settingRepo: SettingRepository by lazy { SettingRepository(database.settingDao()) }
+    val featureRepo: FeatureRepository by lazy { FeatureRepository(database.featureDao()) }
     val posRepo: PosRepository by lazy {
-        PosRepository(database.menuDao(), database.orderDao())
+        PosRepository(database.menuDao(), database.orderDao(), database.shiftDao())
+    }
+    val shiftRepo: ShiftRepository by lazy {
+        ShiftRepository(database.shiftDao(), database.orderDao())
     }
 }
 
@@ -52,13 +50,9 @@ object Session {
     val permissionsState: State<Set<PermissionKey>> get() = _permissions
 
     fun login(user: User, perms: Set<PermissionKey>) {
-        _current.value = user
-        _permissions.value = perms
+        _current.value = user; _permissions.value = perms
     }
-    fun logout() {
-        _current.value = null
-        _permissions.value = emptySet()
-    }
+    fun logout() { _current.value = null; _permissions.value = emptySet() }
     fun isOwner() = _current.value?.role == UserRole.OWNER.id
 
     fun can(p: PermissionKey): Boolean {
@@ -66,7 +60,6 @@ object Session {
         if (u.role == UserRole.OWNER.id) return true
         return p in _permissions.value
     }
-
     fun updatePermissions(perms: Set<PermissionKey>) { _permissions.value = perms }
 }
 
@@ -79,21 +72,26 @@ object Routes {
     const val LOGIN = "login"
     const val MAIN = "main"
 
+    // Tabs
     const val TAB_POS = "tab_pos"
     const val TAB_OPEN_BILL = "tab_openbill"
     const val TAB_MENU = "tab_menu"
     const val TAB_RIWAYAT = "tab_riwayat"
     const val TAB_DASHBOARD = "tab_dashboard"
+    const val TAB_SHIFT = "tab_shift"
     const val TAB_SETTINGS = "tab_settings"
 
+    // Fullscreen routes
     const val KERANJANG = "keranjang"
     const val BAYAR = "bayar"
     const val EDIT_MENU = "edit_menu"
     const val KELOLA_USER = "kelola_user"
     const val FEATURE_TOGGLE = "feature_toggle"
     const val PROFIL_TOKO = "profil_toko"
-    const val TENTANG = "tentang"
     const val TEMA = "tema"
+    const val PRINTER = "printer"
+    const val LAPORAN = "laporan"
+    const val TENTANG = "tentang"
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -103,30 +101,17 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as IyonzApp
-        setContent {
-            IyonzTheme { AppRoot(app) }
-        }
+        setContent { IyonzTheme { AppRoot(app) } }
     }
 }
 
 @Composable
 fun AppRoot(app: IyonzApp) {
     val nav = rememberNavController()
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
-        // Load theme dari settings
-        val themeMode = app.settingRepo.getThemeMode()
-        ThemeManager.update(themeMode)
-
-        // Init fitur: kalau kosong → aktifkan semua
+        ThemeManager.update(app.settingRepo.getThemeMode())
         app.featureRepo.ensureInitialized()
-
-        // Kalau onboarding udah, pastikan owner punya permissions
-        if (app.settingRepo.isOnboardingDone()) {
-            val owners = app.userRepo.users
-            // dijalankan saat login, cukup diamkan
-        }
     }
 
     NavHost(navController = nav, startDestination = Routes.SPLASH) {
@@ -141,8 +126,7 @@ fun AppRoot(app: IyonzApp) {
                     nav.navigate(Routes.LOGIN) {
                         popUpTo(Routes.SPLASH) { inclusive = true }
                     }
-                }
-            )
+                })
         }
         composable(Routes.ONBOARDING) {
             OnboardingScreen(app) {
@@ -160,6 +144,8 @@ fun AppRoot(app: IyonzApp) {
             }
         }
         composable(Routes.MAIN) { MainShell(app, nav) }
+
+        // Fullscreen routes
         composable(Routes.KERANJANG) { KeranjangRoute(app, nav) }
         composable(Routes.BAYAR) { BayarRoute(app, nav) }
         composable(Routes.EDIT_MENU) { EditMenuRoute(app, nav, null) }
@@ -170,10 +156,15 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.FEATURE_TOGGLE) { FeatureToggleRoute(app, nav) }
         composable(Routes.PROFIL_TOKO) { ProfilTokoRoute(app, nav) }
         composable(Routes.TEMA) { TemaRoute(app, nav) }
+        composable(Routes.PRINTER) { PrinterRoute(app, nav) }
+        composable(Routes.LAPORAN) { LaporanRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// MAIN SHELL (Bottom Navigation)
+// ═══════════════════════════════════════════════════════════
 private data class NavTab(
     val route: String, val label: String, val icon: ImageVector,
     val feature: FeatureKey? = null,
@@ -183,7 +174,6 @@ private data class NavTab(
 @Composable
 fun MainShell(app: IyonzApp, nav: NavHostController) {
     val innerNav = rememberNavController()
-    val user by Session.currentState
     val enabledFeatures by FeatureManager.enabled.collectAsState()
 
     val allTabs = listOf(
@@ -197,6 +187,8 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
             permission = PermissionKey.LIHAT_RIWAYAT),
         NavTab(Routes.TAB_DASHBOARD, "Dashboard", Icons.Default.Dashboard,
             feature = FeatureKey.LAPORAN_HARIAN, permission = PermissionKey.LIHAT_DASHBOARD),
+        NavTab(Routes.TAB_SHIFT, "Shift", Icons.Default.Schedule,
+            feature = FeatureKey.SHIFT_KASIR, permission = PermissionKey.JUAL),
         NavTab(Routes.TAB_SETTINGS, "Setelan", Icons.Default.Settings)
     )
 
@@ -223,7 +215,8 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
                             }
                         },
                         icon = { Icon(t.icon, null) },
-                        label = { Text(t.label, style = MaterialTheme.typography.labelSmall) },
+                        label = { Text(t.label,
+                            style = MaterialTheme.typography.labelSmall) },
                         colors = NavigationBarItemDefaults.colors(
                             selectedIconColor = BRAND,
                             selectedTextColor = BRAND,
@@ -241,6 +234,7 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
             composable(Routes.TAB_MENU) { MenuRoute(app, nav, innerNav) }
             composable(Routes.TAB_RIWAYAT) { RiwayatRoute(app) }
             composable(Routes.TAB_DASHBOARD) { DashboardRoute(app) }
+            composable(Routes.TAB_SHIFT) { ShiftRoute(app) }
             composable(Routes.TAB_SETTINGS) { SettingsRoute(app, nav) }
         }
     }
