@@ -398,27 +398,83 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+
+    var showPostPayment by remember { mutableStateOf(false) }
+    var postOrder by remember { mutableStateOf<Order?>(null) }
+    var postItems by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
+    var showPreview by remember { mutableStateOf(false) }
+    var strukText by remember { mutableStateOf("") }
 
     BayarScreen(vm,
         onBack = { nav.popBackStack() },
         onSelesai = { orderId ->
             scope.launch {
-                try {
-                    if (app.settingRepo.isAutoPrint()) {
-                        val order = app.posRepo.getOrder(orderId)
-                        val items = app.posRepo.itemsOf(orderId)
-                        if (order != null) {
-                            if (!PrinterService.isConnected()) {
-                                val mac = app.settingRepo.getPrinterMac()
-                                if (mac.isNotBlank()) PrinterService.connect(app, mac)
-                            }
-                            cetakStruk(app.settingRepo, order, items)
+                val order = app.posRepo.getOrder(orderId)
+                val items = app.posRepo.itemsOf(orderId)
+                postOrder = order
+                postItems = items
+
+                if (app.settingRepo.isAutoPrint()) {
+                    try {
+                        if (!PrinterService.isConnected()) {
+                            val mac = app.settingRepo.getPrinterMac()
+                            if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
                         }
-                    }
-                } catch (_: Exception) {}
-                nav.popBackStack(Routes.MAIN, inclusive = false)
+                        if (order != null) cetakStruk(app.settingRepo, order, items)
+                    } catch (_: Exception) {}
+                }
+                showPostPayment = true
             }
         })
+
+    if (showPostPayment && postOrder != null) {
+        PostPaymentDialog(
+            order = postOrder!!,
+            onPrint = {
+                scope.launch {
+                    try {
+                        if (!PrinterService.isConnected()) {
+                            val mac = app.settingRepo.getPrinterMac()
+                            if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
+                        }
+                        cetakStruk(app.settingRepo, postOrder!!, postItems)
+                    } catch (_: Exception) {}
+                }
+            },
+            onPreview = {
+                strukText = buildStrukText(app.settingRepo, postOrder!!, postItems)
+                showPreview = true
+            },
+            onShare = {
+                val text = buildStrukText(app.settingRepo, postOrder!!, postItems)
+                shareStrukText(ctx, text)
+            },
+            onDone = {
+                showPostPayment = false
+                nav.popBackStack(Routes.MAIN, inclusive = false)
+            }
+        )
+    }
+
+    if (showPreview && postOrder != null) {
+        StrukPreviewDialog(
+            strukText = strukText,
+            onPrint = {
+                scope.launch {
+                    try {
+                        if (!PrinterService.isConnected()) {
+                            val mac = app.settingRepo.getPrinterMac()
+                            if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
+                        }
+                        cetakStruk(app.settingRepo, postOrder!!, postItems)
+                    } catch (_: Exception) {}
+                }
+            },
+            onShareWa = { shareStrukText(ctx, strukText) },
+            onDismiss = { showPreview = false }
+        )
+    }
 }
 
 @Composable
@@ -1850,14 +1906,12 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// RIWAYAT + VOID/REFUND + REPRINT
+// RIWAYAT
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RiwayatScreen(vm: RiwayatViewModel) {
     val orders by vm.orders.collectAsState()
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf<Order?>(null) }
 
     Scaffold(topBar = { TopAppBar(title = { Text("Riwayat Transaksi") }) }) { pad ->
@@ -1880,20 +1934,7 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
         OrderDetailDialog(
             order = order,
             vm = vm,
-            onDismiss = { selected = null },
-            onCetak = {
-                scope.launch {
-                    try {
-                        val app = ctx.applicationContext as IyonzApp
-                        if (!PrinterService.isConnected()) {
-                            val mac = app.settingRepo.getPrinterMac()
-                            if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
-                        }
-                        val items = app.posRepo.itemsOf(order.id)
-                        cetakStruk(app.settingRepo, order, items)
-                    } catch (_: Exception) {}
-                }
-            }
+            onDismiss = { selected = null }
         )
     }
 }
@@ -1957,19 +1998,25 @@ private fun RiwayatCard(o: Order, onClick: () -> Unit) {
 private fun OrderDetailDialog(
     order: Order,
     vm: RiwayatViewModel,
-    onDismiss: () -> Unit,
-    onCetak: () -> Unit = {}
+    onDismiss: () -> Unit
 ) {
+    val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var items by remember { mutableStateOf<List<OrderItem>>(emptyList()) }
     var showVoidDialog by remember { mutableStateOf(false) }
     var showRefundDialog by remember { mutableStateOf(false) }
+    var showPreview by remember { mutableStateOf(false) }
+    var strukText by remember { mutableStateOf("") }
 
     LaunchedEffect(order.id) { items = vm.itemsOf(order.id) }
 
     val canVoid = FeatureManager.isEnabled(FeatureKey.VOID_REFUND)
             && Session.can(PermissionKey.VOID_REFUND)
             && order.status == OrderStatus.PAID.id
+
+    val app = ctx.applicationContext as IyonzApp
+    val printerEnabled = FeatureManager.isEnabled(FeatureKey.PRINTER_BT)
+    val waEnabled = FeatureManager.isEnabled(FeatureKey.WHATSAPP_INTENT)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1987,7 +2034,7 @@ private fun OrderDetailDialog(
             }
         },
         text = {
-            Column(Modifier.heightIn(max = 450.dp),
+            Column(Modifier.heightIn(max = 500.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items.forEach { it ->
                     Row {
@@ -2068,10 +2115,58 @@ private fun OrderDetailDialog(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                OutlinedButton(onClick = onCetak, modifier = Modifier.fillMaxWidth()) {
-                    Icon(Icons.Default.Print, null, Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Cetak Ulang Struk")
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    if (printerEnabled) {
+                        OutlinedButton(
+                            onClick = {
+                                scope.launch {
+                                    try {
+                                        if (!PrinterService.isConnected()) {
+                                            val mac = app.settingRepo.getPrinterMac()
+                                            if (mac.isNotBlank()) {
+                                                PrinterService.connect(ctx, mac)
+                                            }
+                                        }
+                                        cetakStruk(app.settingRepo, order, items)
+                                    } catch (_: Exception) {}
+                                }
+                            },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Print, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Cetak", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            strukText = buildStrukText(app.settingRepo, order, items)
+                            showPreview = true
+                        },
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Receipt, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Preview", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (waEnabled) {
+                        OutlinedButton(
+                            onClick = {
+                                val text = buildStrukText(app.settingRepo, order, items)
+                                shareStrukText(ctx, text)
+                            },
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 8.dp)
+                        ) {
+                            Icon(Icons.Default.Share, null, Modifier.size(16.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Share", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
 
                 if (canVoid) {
@@ -2105,6 +2200,29 @@ private fun OrderDetailDialog(
             TextButton(onClick = onDismiss) { Text("Tutup") }
         }
     )
+
+    if (showPreview) {
+        StrukPreviewDialog(
+            strukText = strukText,
+            onPrint = if (printerEnabled) {
+                {
+                    scope.launch {
+                        try {
+                            if (!PrinterService.isConnected()) {
+                                val mac = app.settingRepo.getPrinterMac()
+                                if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
+                            }
+                            cetakStruk(app.settingRepo, order, items)
+                        } catch (_: Exception) {}
+                    }
+                }
+            } else null,
+            onShareWa = if (waEnabled) {
+                { shareStrukText(ctx, strukText) }
+            } else null,
+            onDismiss = { showPreview = false }
+        )
+    }
 
     if (showVoidDialog) {
         AlasanDialog(
@@ -2257,4 +2375,112 @@ private fun StatCard(
                 fontWeight = FontWeight.Bold, color = BRAND)
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════
+// POST PAYMENT DIALOG — cetak / preview / share setelah bayar
+// ═══════════════════════════════════════════════════════════
+@Composable
+fun PostPaymentDialog(
+    order: Order,
+    onPrint: () -> Unit,
+    onPreview: () -> Unit,
+    onShare: () -> Unit,
+    onDone: () -> Unit
+) {
+    val printerEnabled = FeatureManager.isEnabled(FeatureKey.PRINTER_BT)
+    val waEnabled = FeatureManager.isEnabled(FeatureKey.WHATSAPP_INTENT)
+
+    AlertDialog(
+        onDismissRequest = onDone,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.CheckCircle, null, tint = SUCCESS,
+                    modifier = Modifier.size(28.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Transaksi Berhasil")
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = BRAND_LIGHT)) {
+                    Column(Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Row {
+                            Text("Order", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall)
+                            Text("#${order.id}", fontWeight = FontWeight.SemiBold)
+                        }
+                        Row {
+                            Text("Total", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall)
+                            Text(order.total.rupiah(), fontWeight = FontWeight.Bold,
+                                color = BRAND)
+                        }
+                        Row {
+                            Text("Bayar", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall)
+                            Text(PaymentMethod.fromId(order.metodeBayar).label)
+                        }
+                        if (order.kembalian > 0) {
+                            Row {
+                                Text("Kembalian", Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodySmall)
+                                Text(order.kembalian.rupiah())
+                            }
+                        }
+                    }
+                }
+
+                Text("Cetak atau bagikan struk?",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth()) {
+                    if (printerEnabled) {
+                        Button(
+                            onClick = onPrint,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = BRAND),
+                            contentPadding = PaddingValues(vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Default.Print, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Cetak", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                    OutlinedButton(
+                        onClick = onPreview,
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(vertical = 10.dp)
+                    ) {
+                        Icon(Icons.Default.Visibility, null, Modifier.size(18.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Preview", style = MaterialTheme.typography.bodySmall)
+                    }
+                    if (waEnabled) {
+                        OutlinedButton(
+                            onClick = onShare,
+                            modifier = Modifier.weight(1f),
+                            contentPadding = PaddingValues(vertical = 10.dp)
+                        ) {
+                            Icon(Icons.Default.Share, null, Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("WA", style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDone,
+                colors = ButtonDefaults.buttonColors(containerColor = BRAND)
+            ) {
+                Text("Selesai", fontWeight = FontWeight.Bold)
+            }
+        }
+    )
 }
