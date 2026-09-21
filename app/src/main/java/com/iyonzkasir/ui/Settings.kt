@@ -42,11 +42,19 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     val user by Session.currentState
     var namaToko by remember { mutableStateOf("") }
     var businessType by remember { mutableStateOf(BusinessType.WARUNG) }
+    var memberCount by remember { mutableIntStateOf(0) }
+    val enabled by FeatureManager.enabled.collectAsState()
 
     LaunchedEffect(Unit) {
         namaToko = app.settingRepo.getNamaToko()
         businessType = app.settingRepo.getBusinessType()
     }
+    LaunchedEffect(Unit) {
+        app.crmRepo.memberCount.collect { memberCount = it }
+    }
+
+    val crmEnabled = FeatureKey.MEMBER in enabled || FeatureKey.VOUCHER in enabled
+            || FeatureKey.HUTANG_PELANGGAN in enabled
 
     Scaffold(
         topBar = {
@@ -154,6 +162,18 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // CRM
+            if (crmEnabled) {
+                item {
+                    SectionHeader("CRM")
+                    SettingsItem("Member & Voucher", Icons.Default.People,
+                        subtitle = if (memberCount > 0) "$memberCount member terdaftar"
+                        else "Kelola member, poin & voucher") {
+                        nav.navigate(Routes.CRM)
+                    }
+                }
+            }
+
             // Tampilan
             item {
                 SectionHeader("Tampilan")
@@ -222,7 +242,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 SectionHeader("Tentang")
                 SettingsItem("Tentang Aplikasi", Icons.Default.Info,
-                    subtitle = "iyonzkasir v0.4.0") {
+                    subtitle = "iyonzkasir v0.5.0") {
                     nav.navigate(Routes.TENTANG)
                 }
             }
@@ -230,7 +250,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.4.0 • Made with ❤️",
+                    Text("iyonzkasir v0.5.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -665,7 +685,7 @@ fun TentangRoute(nav: NavHostController) {
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.4.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.5.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Text(
