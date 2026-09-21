@@ -64,7 +64,7 @@ data class MenuItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val nama: String = "",
     val harga: Int = 0,
-    val hargaBeli: Int = 0,   // HPP / modal
+    val hargaBeli: Int = 0,
     val kategori: String = "Umum",
     val fotoUri: String? = null,
     val tersedia: Boolean = true
@@ -126,7 +126,7 @@ data class Shift(
     val status: String = "OPEN"
 )
 
-// ═══════ DATA CLASS UNTUK LAPORAN ═══════
+// ═══════ DATA CLASS LAPORAN ═══════
 
 data class LabaProduk(
     val menuId: Long,
@@ -270,7 +270,6 @@ interface OrderDao {
     @Query("UPDATE orders SET status = :status, voidReason = :reason WHERE id = :id")
     suspend fun updateStatus(id: Long, status: String, reason: String)
 
-    // ── Shift queries ──
     @Query("SELECT COUNT(*) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
     suspend fun countByShift(shiftId: Long): Int
     @Query("SELECT COALESCE(SUM(total), 0) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
@@ -282,7 +281,6 @@ interface OrderDao {
     @Query("SELECT COALESCE(SUM(pajakAmount), 0) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
     suspend fun sumPajakByShift(shiftId: Long): Int
 
-    // ── Laporan laba per produk ──
     @Query("""
         SELECT oi.menuId AS menuId,
                oi.namaMenu AS namaMenu,
@@ -489,6 +487,15 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun isAutoPrint() = get(KEY_AUTO_PRINT, "0") == "1"
     suspend fun setAutoPrint(v: Boolean) = set(KEY_AUTO_PRINT, if (v) "1" else "0")
 
+    // ── Backup ──
+    suspend fun getLastBackupTimestamp() =
+        get(KEY_LAST_BACKUP, "0").toLongOrNull() ?: 0L
+    suspend fun setLastBackupTimestamp(ts: Long) =
+        set(KEY_LAST_BACKUP, ts.toString())
+    suspend fun getLastBackupName() = get(KEY_LAST_BACKUP_NAME, "")
+    suspend fun setLastBackupName(name: String) =
+        set(KEY_LAST_BACKUP_NAME, name)
+
     companion object {
         const val KEY_NAMA_TOKO = "toko_nama"
         const val KEY_ALAMAT = "toko_alamat"
@@ -502,6 +509,8 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_PRINTER_NAMA = "printer_nama"
         const val KEY_PAPER_WIDTH = "paper_width"
         const val KEY_AUTO_PRINT = "auto_print"
+        const val KEY_LAST_BACKUP = "last_backup_ts"
+        const val KEY_LAST_BACKUP_NAME = "last_backup_name"
     }
 }
 
