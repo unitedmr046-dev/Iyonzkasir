@@ -151,7 +151,7 @@ data class Member(
 data class Voucher(
     @PrimaryKey val kode: String = "",
     val nama: String = "",
-    val tipe: String = "NOMINAL", // NOMINAL | PERSEN
+    val tipe: String = "NOMINAL",
     val value: Int = 0,
     val minBelanja: Int = 0,
     val maxDiskon: Int = 0,
@@ -168,7 +168,7 @@ data class MemberTransaction(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val memberId: Long = 0,
     val orderId: Long = 0,
-    val tipe: String = "POIN_EARN", // POIN_EARN | POIN_REDEEM | HUTANG_ADD | HUTANG_PAY | ADJUST
+    val tipe: String = "POIN_EARN",
     val poinDelta: Int = 0,
     val hutangDelta: Int = 0,
     val saldoPoinSetelah: Int = 0,
@@ -329,16 +329,19 @@ interface OrderDao {
     @Query("SELECT COALESCE(SUM(pajakAmount), 0) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
     suspend fun sumPajakByShift(shiftId: Long): Int
 
+    // Laba per produk — pakai oi.hargaSatuan * oi.qty (bukan oi.subtotal yang computed)
     @Query("""
-        SELECT oi.menuId AS menuId, oi.namaMenu AS namaMenu,
-               SUM(oi.qty) AS totalQty, SUM(oi.subtotal) AS totalOmzet,
+        SELECT oi.menuId AS menuId,
+               oi.namaMenu AS namaMenu,
+               SUM(oi.qty) AS totalQty,
+               SUM(oi.hargaSatuan * oi.qty) AS totalOmzet,
                SUM(oi.qty * COALESCE(m.hargaBeli, 0)) AS totalHpp
         FROM order_items oi
         JOIN orders o ON o.id = oi.orderId
         LEFT JOIN menu_items m ON m.id = oi.menuId
         WHERE o.status = 'PAID' AND o.timestamp >= :start AND o.timestamp <= :end
         GROUP BY oi.menuId, oi.namaMenu
-        ORDER BY (SUM(oi.subtotal) - SUM(oi.qty * COALESCE(m.hargaBeli, 0))) DESC
+        ORDER BY (SUM(oi.hargaSatuan * oi.qty) - SUM(oi.qty * COALESCE(m.hargaBeli, 0))) DESC
     """)
     suspend fun labaPerProduk(start: Long, end: Long): List<LabaProduk>
 
@@ -409,7 +412,8 @@ interface MemberTxDao {
     @Query("SELECT * FROM orders WHERE memberId = :memberId AND status = 'PAID' ORDER BY timestamp DESC LIMIT 50")
     suspend fun ordersForMember(memberId: Long): List<Order>
     @Query("""
-        SELECT o.memberId AS memberId, COUNT(o.id) AS totalOrder, COALESCE(SUM(o.total), 0) AS totalOmzet
+        SELECT o.memberId AS memberId, COUNT(o.id) AS totalOrder,
+               COALESCE(SUM(o.total), 0) AS totalOmzet
         FROM orders o WHERE o.memberId = :memberId AND o.status = 'PAID'
         GROUP BY o.memberId
     """)
@@ -478,14 +482,12 @@ val MIGRATION_5_6 = object : Migration(5, 6) {
 
 val MIGRATION_6_7 = object : Migration(6, 7) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // Orders tambahan
         db.execSQL("ALTER TABLE orders ADD COLUMN voucherKode TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE orders ADD COLUMN voucherAmount INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE orders ADD COLUMN memberId INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE orders ADD COLUMN memberNama TEXT NOT NULL DEFAULT ''")
         db.execSQL("ALTER TABLE orders ADD COLUMN poinDidapat INTEGER NOT NULL DEFAULT 0")
 
-        // Members
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `members` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -503,7 +505,6 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
             )
         """.trimIndent())
 
-        // Vouchers
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `vouchers` (
                 `kode` TEXT PRIMARY KEY NOT NULL,
@@ -521,7 +522,6 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
             )
         """.trimIndent())
 
-        // Member transactions
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `member_transactions` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -643,7 +643,6 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getThemeMode() = ThemeMode.fromId(get(KEY_TEMA_MODE, "system"))
     suspend fun setThemeMode(m: ThemeMode) = set(KEY_TEMA_MODE, m.id)
 
-    // Printer
     suspend fun getPrinterMac() = get(KEY_PRINTER_MAC, "")
     suspend fun setPrinterMac(mac: String) = set(KEY_PRINTER_MAC, mac)
     suspend fun getPrinterNama() = get(KEY_PRINTER_NAMA, "")
@@ -653,7 +652,6 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun isAutoPrint() = get(KEY_AUTO_PRINT, "0") == "1"
     suspend fun setAutoPrint(v: Boolean) = set(KEY_AUTO_PRINT, if (v) "1" else "0")
 
-    // Backup
     suspend fun getLastBackupTimestamp() =
         get(KEY_LAST_BACKUP, "0").toLongOrNull() ?: 0L
     suspend fun setLastBackupTimestamp(ts: Long) = set(KEY_LAST_BACKUP, ts.toString())
@@ -813,41 +811,33 @@ class CrmRepository(
     suspend fun statMember(memberId: Long) = txDao.statForMember(memberId)
     suspend fun ordersForMember(memberId: Long) = txDao.ordersForMember(memberId)
 
-    /** Proses transaksi order: tambah poin, tambah hutang kalau metode HUTANG. */
     suspend fun processOrder(memberId: Long, order: Order) {
         val m = memberDao.getById(memberId) ?: return
         var newPoin = m.poin
         var newHutang = m.hutang
         var newTotalBelanja = m.totalBelanja
 
-        // 1. Poin earn (dari total)
         val poinDidapat = LoyaltyConfig.hitungPoinDidapat(order.total)
         if (poinDidapat > 0) {
             newPoin += poinDidapat
             txDao.insert(MemberTransaction(
                 memberId = memberId, orderId = order.id,
-                tipe = "POIN_EARN",
-                poinDelta = poinDidapat,
-                saldoPoinSetelah = newPoin,
-                saldoHutangSetelah = newHutang,
+                tipe = "POIN_EARN", poinDelta = poinDidapat,
+                saldoPoinSetelah = newPoin, saldoHutangSetelah = newHutang,
                 keterangan = "Poin dari order #${order.id}"
             ))
         }
 
-        // 2. Hutang
         if (order.metodeBayar == PaymentMethod.HUTANG.id) {
             newHutang += order.total
             txDao.insert(MemberTransaction(
                 memberId = memberId, orderId = order.id,
-                tipe = "HUTANG_ADD",
-                hutangDelta = order.total,
-                saldoPoinSetelah = newPoin,
-                saldoHutangSetelah = newHutang,
+                tipe = "HUTANG_ADD", hutangDelta = order.total,
+                saldoPoinSetelah = newPoin, saldoHutangSetelah = newHutang,
                 keterangan = "Hutang dari order #${order.id}"
             ))
         }
 
-        // 3. Total belanja
         newTotalBelanja += order.total
         val newTier = MemberTier.fromTotalBelanja(newTotalBelanja)
 
@@ -857,7 +847,6 @@ class CrmRepository(
         ))
     }
 
-    /** Bayar hutang member. */
     suspend fun bayarHutang(memberId: Long, jumlah: Int, keterangan: String = "") {
         val m = memberDao.getById(memberId) ?: return
         if (jumlah <= 0) return
@@ -866,14 +855,12 @@ class CrmRepository(
         txDao.insert(MemberTransaction(
             memberId = memberId, tipe = "HUTANG_PAY",
             hutangDelta = -bayar,
-            saldoPoinSetelah = m.poin,
-            saldoHutangSetelah = newHutang,
+            saldoPoinSetelah = m.poin, saldoHutangSetelah = newHutang,
             keterangan = keterangan.ifBlank { "Bayar hutang" }
         ))
         memberDao.update(m.copy(hutang = newHutang))
     }
 
-    /** Redeem poin (tukar jadi diskon). */
     suspend fun redeemPoin(memberId: Long, poin: Int): Int {
         val m = memberDao.getById(memberId) ?: return 0
         if (poin <= 0 || poin > m.poin) return 0
@@ -882,15 +869,13 @@ class CrmRepository(
         txDao.insert(MemberTransaction(
             memberId = memberId, tipe = "POIN_REDEEM",
             poinDelta = -poin,
-            saldoPoinSetelah = newPoin,
-            saldoHutangSetelah = m.hutang,
+            saldoPoinSetelah = newPoin, saldoHutangSetelah = m.hutang,
             keterangan = "Tukar $poin poin = ${rupiah} rupiah"
         ))
         memberDao.update(m.copy(poin = newPoin))
         return rupiah
     }
 
-    /** Update member manual (adjust poin/hutang). */
     suspend fun adjust(memberId: Long, poinDelta: Int, hutangDelta: Int, ket: String) {
         val m = memberDao.getById(memberId) ?: return
         val newPoin = (m.poin + poinDelta).coerceAtLeast(0)
@@ -904,7 +889,6 @@ class CrmRepository(
         memberDao.update(m.copy(poin = newPoin, hutang = newHutang))
     }
 
-    /** Tandai voucher terpakai. */
     suspend fun markVoucherUsed(kode: String) {
         val v = voucherDao.getByKode(kode) ?: return
         voucherDao.update(v.copy(terpakai = v.terpakai + 1))
