@@ -142,6 +142,18 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Laporan
+            if (FeatureManager.isEnabled(FeatureKey.LABA_PER_PRODUK)
+                && Session.can(PermissionKey.LIHAT_LAPORAN)) {
+                item {
+                    SectionHeader("Laporan")
+                    SettingsItem("Laporan & Laba", Icons.Default.Analytics,
+                        subtitle = "Laba per produk, grafik, export CSV") {
+                        nav.navigate(Routes.LAPORAN)
+                    }
+                }
+            }
+
             // Tampilan
             item {
                 SectionHeader("Tampilan")
@@ -173,25 +185,25 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Hardware
-            if (Session.can(PermissionKey.BUKA_SETELAN)) {
+            // Shift
+            if (FeatureManager.isEnabled(FeatureKey.SHIFT_KASIR)) {
                 item {
-                    SectionHeader("Printer & Hardware")
-                    SettingsItem("Printer Bluetooth", Icons.Default.Print,
-                        subtitle = "Segera hadir") { }
-                    SettingsItem("Ukuran Struk", Icons.Default.Receipt,
-                        subtitle = "58mm / 80mm (segera)") { }
+                    SectionHeader("Shift Kasir")
+                    SettingsItem("Kelola Shift", Icons.Default.Schedule,
+                        subtitle = "Buka/tutup shift & laporan kasir") {
+                        nav.navigate(Routes.TAB_SHIFT)
+                    }
                 }
             }
 
-            // Backup
-            if (Session.can(PermissionKey.BACKUP_RESTORE)) {
+            // Hardware
+            if (FeatureManager.isEnabled(FeatureKey.PRINTER_BT)) {
                 item {
-                    SectionHeader("Backup & Restore")
-                    SettingsItem("Backup Manual", Icons.Default.CloudUpload,
-                        subtitle = "Segera hadir") { }
-                    SettingsItem("Restore", Icons.Default.CloudDownload,
-                        subtitle = "Segera hadir") { }
+                    SectionHeader("Printer & Hardware")
+                    SettingsItem("Printer Bluetooth", Icons.Default.Print,
+                        subtitle = "Sambungkan & test printer struk") {
+                        nav.navigate(Routes.PRINTER)
+                    }
                 }
             }
 
@@ -199,7 +211,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 SectionHeader("Tentang")
                 SettingsItem("Tentang Aplikasi", Icons.Default.Info,
-                    subtitle = "iyonzkasir v0.2.0") {
+                    subtitle = "iyonzkasir v0.3.0") {
                     nav.navigate(Routes.TENTANG)
                 }
             }
@@ -207,7 +219,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.2.0 • Made with ❤️",
+                    Text("iyonzkasir v0.3.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -263,9 +275,7 @@ fun TemaRoute(app: IyonzApp, nav: NavHostController) {
     val scope = rememberCoroutineScope()
     var selected by remember { mutableStateOf(ThemeManager.mode) }
 
-    LaunchedEffect(Unit) {
-        selected = app.settingRepo.getThemeMode()
-    }
+    LaunchedEffect(Unit) { selected = app.settingRepo.getThemeMode() }
 
     Scaffold(
         topBar = {
@@ -424,11 +434,8 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
                 TextButton(onClick = {
                     scope.launch {
                         val bt = app.settingRepo.getBusinessType()
-                        if (bt == BusinessType.CUSTOM) {
-                            app.featureRepo.enableAll()
-                        } else {
-                            app.featureRepo.applyPreset(bt)
-                        }
+                        if (bt == BusinessType.CUSTOM) app.featureRepo.enableAll()
+                        else app.featureRepo.applyPreset(bt)
                         showResetDialog = false
                     }
                 }) { Text("Reset") }
@@ -647,7 +654,7 @@ fun TentangRoute(nav: NavHostController) {
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.2.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.3.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Text(
