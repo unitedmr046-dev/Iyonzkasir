@@ -443,12 +443,16 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
                 }
             },
             onPreview = {
-                strukText = buildStrukText(app.settingRepo, postOrder!!, postItems)
-                showPreview = true
+                scope.launch {
+                    strukText = buildStrukText(app.settingRepo, postOrder!!, postItems)
+                    showPreview = true
+                }
             },
             onShare = {
-                val text = buildStrukText(app.settingRepo, postOrder!!, postItems)
-                shareStrukText(ctx, text)
+                scope.launch {
+                    val text = buildStrukText(app.settingRepo, postOrder!!, postItems)
+                    shareStrukText(ctx, text)
+                }
             },
             onDone = {
                 showPostPayment = false
@@ -471,7 +475,12 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
                     } catch (_: Exception) {}
                 }
             },
-            onShareWa = { shareStrukText(ctx, strukText) },
+            onShareWa = {
+                scope.launch {
+                    val text = buildStrukText(app.settingRepo, postOrder!!, postItems)
+                    shareStrukText(ctx, text)
+                }
+            },
             onDismiss = { showPreview = false }
         )
     }
@@ -2143,8 +2152,10 @@ private fun OrderDetailDialog(
                     }
                     OutlinedButton(
                         onClick = {
-                            strukText = buildStrukText(app.settingRepo, order, items)
-                            showPreview = true
+                            scope.launch {
+                                strukText = buildStrukText(app.settingRepo, order, items)
+                                showPreview = true
+                            }
                         },
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(vertical = 8.dp)
@@ -2156,8 +2167,10 @@ private fun OrderDetailDialog(
                     if (waEnabled) {
                         OutlinedButton(
                             onClick = {
-                                val text = buildStrukText(app.settingRepo, order, items)
-                                shareStrukText(ctx, text)
+                                scope.launch {
+                                    val text = buildStrukText(app.settingRepo, order, items)
+                                    shareStrukText(ctx, text)
+                                }
                             },
                             modifier = Modifier.weight(1f),
                             contentPadding = PaddingValues(vertical = 8.dp)
@@ -2218,7 +2231,12 @@ private fun OrderDetailDialog(
                 }
             } else null,
             onShareWa = if (waEnabled) {
-                { shareStrukText(ctx, strukText) }
+                {
+                    scope.launch {
+                        val text = buildStrukText(app.settingRepo, order, items)
+                        shareStrukText(ctx, text)
+                    }
+                }
             } else null,
             onDismiss = { showPreview = false }
         )
@@ -2378,7 +2396,7 @@ private fun StatCard(
 }
 
 // ═══════════════════════════════════════════════════════════
-// POST PAYMENT DIALOG — cetak / preview / share setelah bayar
+// POST PAYMENT DIALOG
 // ═══════════════════════════════════════════════════════════
 @Composable
 fun PostPaymentDialog(
