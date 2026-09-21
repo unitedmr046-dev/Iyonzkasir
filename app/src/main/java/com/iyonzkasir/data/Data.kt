@@ -2,6 +2,8 @@ package com.iyonzkasir.data
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.iyonzkasir.*
 import kotlinx.coroutines.flow.Flow
 import java.util.UUID
@@ -21,6 +23,17 @@ data class User(
     val biometricEnabled: Boolean = false,
     val createdAt: Long = System.currentTimeMillis(),
     val lastLoginAt: Long = 0
+)
+
+@Entity(
+    tableName = "user_permissions",
+    primaryKeys = ["userId", "permissionKey"]
+)
+data class UserPermission(
+    val userId: String,
+    val permissionKey: String,
+    val allowed: Boolean = false,
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "audit_log")
@@ -121,6 +134,27 @@ interface UserDao {
 }
 
 @Dao
+interface PermissionDao {
+    @Query("SELECT * FROM user_permissions WHERE userId = :userId")
+    fun observeForUser(userId: String): Flow<List<UserPermission>>
+
+    @Query("SELECT * FROM user_permissions WHERE userId = :userId")
+    suspend fun getForUser(userId: String): List<UserPermission>
+
+    @Query("SELECT * FROM user_permissions")
+    suspend fun getAll(): List<UserPermission>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(perm: UserPermission)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(perms: List<UserPermission>)
+
+    @Query("DELETE FROM user_permissions WHERE userId = :userId")
+    suspend fun clearForUser(userId: String)
+}
+
+@Dao
 interface AuditDao {
     @Query("SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT 500")
     fun observeRecent(): Flow<List<AuditLog>>
@@ -218,18 +252,35 @@ interface OrderDao {
     fun sumPaidSince(start: Long): Flow<Int>
 }
 
+// ═══════ MIGRATION v2 → v3 ═══════
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `user_permissions` (
+                `userId` TEXT NOT NULL,
+                `permissionKey` TEXT NOT NULL,
+                `allowed` INTEGER NOT NULL DEFAULT 0,
+                `updatedAt` INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY(`userId`, `permissionKey`)
+            )
+        """.trimIndent())
+    }
+}
+
 // ═══════ DATABASE ═══════
 
 @Database(
     entities = [
-        User::class, AuditLog::class, AppSetting::class, FeatureToggleEntity::class,
-        MenuItem::class, Order::class, OrderItem::class
+        User::class, UserPermission::class, AuditLog::class, AppSetting::class,
+        FeatureToggleEntity::class, MenuItem::class, Order::class, OrderItem::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
+    abstract fun permissionDao(): PermissionDao
     abstract fun auditDao(): AuditDao
     abstract fun settingDao(): SettingDao
     abstract fun featureDao(): FeatureDao
@@ -244,7 +295,9 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "iyonzkasir.db"
-                ).fallbackToDestructiveMigration().build().also { INSTANCE = it }
+                ).addMigrations(MIGRATION_2_3)
+                    .build()
+                    .also { INSTANCE = it }
             }
     }
 }
@@ -253,6 +306,7 @@ abstract class AppDatabase : RoomDatabase() {
 
 class UserRepository(
     private val dao: UserDao,
+    private val permDao: PermissionDao,
     private val auditDao: AuditDao
 ) {
     val users: Flow<List<User>> = dao.observeAll()
@@ -261,11 +315,40 @@ class UserRepository(
     suspend fun getById(id: String) = dao.getById(id)
     suspend fun getByUsername(username: String) = dao.getByUsername(username)
     suspend fun upsert(user: User) = dao.upsert(user)
-    suspend fun delete(user: User) = dao.delete(user)
+    suspend fun delete(user: User) {
+        permDao.clearForUser(user.id)
+        dao.delete(user)
+    }
     suspend fun ownerCount() = dao.ownerCount()
     suspend fun totalCount() = dao.totalCount()
     suspend fun updateLastLogin(id: String) = dao.updateLastLogin(id)
 
+    // ── Permission ──
+    fun observePermissions(userId: String) = permDao.observeForUser(userId)
+    suspend fun getPermissions(userId: String) = permDao.getForUser(userId)
+    suspend fun setPermission(userId: String, key: PermissionKey, allowed: Boolean) {
+        permDao.upsert(UserPermission(userId, key.key, allowed))
+    }
+    suspend fun setPermissionsBatch(userId: String, perms: Map<PermissionKey, Boolean>) {
+        permDao.upsertAll(perms.map { UserPermission(userId, it.key.key, it.value) })
+    }
+    suspend fun applyRolePreset(userId: String, role: UserRole) {
+        val defaults = role.defaultPermissions.map { it.key }.toSet()
+        permDao.clearForUser(userId)
+        permDao.upsertAll(PermissionKey.values().map {
+            UserPermission(userId, it.key, it.key in defaults)
+        })
+    }
+    suspend fun seedPermissionsIfEmpty(userId: String, role: UserRole) {
+        val existing = permDao.getForUser(userId)
+        if (existing.isEmpty()) applyRolePreset(userId, role)
+    }
+    suspend fun canUser(userId: String, key: PermissionKey): Boolean {
+        val list = permDao.getForUser(userId)
+        return list.firstOrNull { it.permissionKey == key.key }?.allowed ?: false
+    }
+
+    // ── Audit ──
     suspend fun log(
         userId: String, userName: String, aksi: String,
         targetId: String = "", keterangan: String = "", otorisasi: String = ""
@@ -293,6 +376,8 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getBusinessType() = BusinessType.fromId(get(KEY_BUSINESS_TYPE, "warung"))
     suspend fun isOnboardingDone() = get(KEY_ONBOARDING_DONE, "0") == "1"
     suspend fun setOnboardingDone() = set(KEY_ONBOARDING_DONE, "1")
+    suspend fun getThemeMode() = ThemeMode.fromId(get(KEY_TEMA_MODE, "system"))
+    suspend fun setThemeMode(m: ThemeMode) = set(KEY_TEMA_MODE, m.id)
 
     companion object {
         const val KEY_NAMA_TOKO = "toko_nama"
@@ -302,7 +387,7 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_FOOTER = "struk_footer"
         const val KEY_BUSINESS_TYPE = "business_type"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
-        const val KEY_TEMA_DARK = "tema_dark"
+        const val KEY_TEMA_MODE = "tema_mode"
     }
 }
 
@@ -319,13 +404,44 @@ class FeatureRepository(private val dao: FeatureDao) {
         refreshCache()
     }
 
-    suspend fun applyPreset(type: BusinessType) {
-        val defaults = type.defaultFeatures.map { it.key }.toSet()
+    /** Aktifkan semua fitur. */
+    suspend fun enableAll() {
         dao.clear()
         dao.upsertAll(FeatureKey.values().map {
-            FeatureToggleEntity(it.key, enabled = it.key in defaults)
+            FeatureToggleEntity(it.key, enabled = true)
         })
         refreshCache()
+    }
+
+    /** Aktifkan hanya fitur-fitur tertentu. */
+    suspend fun setOnly(enabled: Set<FeatureKey>) {
+        dao.clear()
+        dao.upsertAll(FeatureKey.values().map {
+            FeatureToggleEntity(it.key, enabled = it in enabled)
+        })
+        refreshCache()
+    }
+
+    /** Terapkan preset sesuai business type. Custom = semua OFF. */
+    suspend fun applyPreset(type: BusinessType) {
+        if (type == BusinessType.CUSTOM) {
+            dao.clear()
+            dao.upsertAll(FeatureKey.values().map {
+                FeatureToggleEntity(it.key, enabled = false)
+            })
+        } else {
+            setOnly(type.defaultFeatures)
+        }
+        refreshCache()
+    }
+
+    /** Kalau DB toggle kosong, aktifkan semua. */
+    suspend fun ensureInitialized() {
+        if (dao.getAllSync().isEmpty()) {
+            enableAll()
+        } else {
+            refreshCache()
+        }
     }
 
     suspend fun refreshCache() {
