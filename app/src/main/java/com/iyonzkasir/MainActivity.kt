@@ -18,6 +18,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.iyonzkasir.data.*
 import com.iyonzkasir.ui.*
+import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
 // APPLICATION
@@ -25,7 +26,7 @@ import com.iyonzkasir.ui.*
 class IyonzApp : Application() {
     val database: AppDatabase by lazy { AppDatabase.get(this) }
     val userRepo: UserRepository by lazy {
-        UserRepository(database.userDao(), database.auditDao())
+        UserRepository(database.userDao(), database.permissionDao(), database.auditDao())
     }
     val settingRepo: SettingRepository by lazy {
         SettingRepository(database.settingDao())
@@ -46,21 +47,27 @@ object Session {
     val current: User? get() = _current.value
     val currentState: State<User?> get() = _current
 
-    fun login(user: User) { _current.value = user }
-    fun logout() { _current.value = null }
+    private val _permissions = mutableStateOf<Set<PermissionKey>>(emptySet())
+    val permissions: Set<PermissionKey> get() = _permissions.value
+    val permissionsState: State<Set<PermissionKey>> get() = _permissions
+
+    fun login(user: User, perms: Set<PermissionKey>) {
+        _current.value = user
+        _permissions.value = perms
+    }
+    fun logout() {
+        _current.value = null
+        _permissions.value = emptySet()
+    }
     fun isOwner() = _current.value?.role == UserRole.OWNER.id
 
-    fun can(feature: FeatureKey): Boolean {
+    fun can(p: PermissionKey): Boolean {
         val u = _current.value ?: return false
-        return when (u.role) {
-            UserRole.OWNER.id -> true
-            UserRole.SUPERVISOR.id -> true
-            UserRole.KASIR.id -> feature in kasirAllowed
-            else -> false
-        }
+        if (u.role == UserRole.OWNER.id) return true
+        return p in _permissions.value
     }
 
-    private val kasirAllowed = setOf(FeatureKey.LAPORAN_HARIAN)
+    fun updatePermissions(perms: Set<PermissionKey>) { _permissions.value = perms }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -86,6 +93,7 @@ object Routes {
     const val FEATURE_TOGGLE = "feature_toggle"
     const val PROFIL_TOKO = "profil_toko"
     const val TENTANG = "tentang"
+    const val TEMA = "tema"
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -104,8 +112,22 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppRoot(app: IyonzApp) {
     val nav = rememberNavController()
+    val scope = rememberCoroutineScope()
 
-    LaunchedEffect(Unit) { app.featureRepo.refreshCache() }
+    LaunchedEffect(Unit) {
+        // Load theme dari settings
+        val themeMode = app.settingRepo.getThemeMode()
+        ThemeManager.update(themeMode)
+
+        // Init fitur: kalau kosong → aktifkan semua
+        app.featureRepo.ensureInitialized()
+
+        // Kalau onboarding udah, pastikan owner punya permissions
+        if (app.settingRepo.isOnboardingDone()) {
+            val owners = app.userRepo.users
+            // dijalankan saat login, cukup diamkan
+        }
+    }
 
     NavHost(navController = nav, startDestination = Routes.SPLASH) {
         composable(Routes.SPLASH) {
@@ -130,8 +152,8 @@ fun AppRoot(app: IyonzApp) {
             }
         }
         composable(Routes.LOGIN) {
-            LoginScreen(app.userRepo) { user ->
-                Session.login(user)
+            LoginScreen(app.userRepo) { user, perms ->
+                Session.login(user, perms)
                 nav.navigate(Routes.MAIN) {
                     popUpTo(Routes.LOGIN) { inclusive = true }
                 }
@@ -147,13 +169,15 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.KELOLA_USER) { KelolaUserRoute(app, nav) }
         composable(Routes.FEATURE_TOGGLE) { FeatureToggleRoute(app, nav) }
         composable(Routes.PROFIL_TOKO) { ProfilTokoRoute(app, nav) }
+        composable(Routes.TEMA) { TemaRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
 
 private data class NavTab(
     val route: String, val label: String, val icon: ImageVector,
-    val feature: FeatureKey? = null
+    val feature: FeatureKey? = null,
+    val permission: PermissionKey? = null
 )
 
 @Composable
@@ -163,23 +187,23 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
     val enabledFeatures by FeatureManager.enabled.collectAsState()
 
     val allTabs = listOf(
-        NavTab(Routes.TAB_POS, "Kasir", Icons.Default.PointOfSale),
-        NavTab(Routes.TAB_OPEN_BILL, "Open Bill", Icons.Default.ReceiptLong, FeatureKey.OPEN_BILL),
-        NavTab(Routes.TAB_MENU, "Menu", Icons.Default.Restaurant),
-        NavTab(Routes.TAB_RIWAYAT, "Riwayat", Icons.Default.History),
-        NavTab(Routes.TAB_DASHBOARD, "Dashboard", Icons.Default.Dashboard, FeatureKey.LAPORAN_HARIAN),
+        NavTab(Routes.TAB_POS, "Kasir", Icons.Default.PointOfSale,
+            permission = PermissionKey.JUAL),
+        NavTab(Routes.TAB_OPEN_BILL, "Open Bill", Icons.Default.ReceiptLong,
+            feature = FeatureKey.OPEN_BILL, permission = PermissionKey.OPEN_BILL),
+        NavTab(Routes.TAB_MENU, "Menu", Icons.Default.Restaurant,
+            permission = PermissionKey.KELOLA_MENU),
+        NavTab(Routes.TAB_RIWAYAT, "Riwayat", Icons.Default.History,
+            permission = PermissionKey.LIHAT_RIWAYAT),
+        NavTab(Routes.TAB_DASHBOARD, "Dashboard", Icons.Default.Dashboard,
+            feature = FeatureKey.LAPORAN_HARIAN, permission = PermissionKey.LIHAT_DASHBOARD),
         NavTab(Routes.TAB_SETTINGS, "Setelan", Icons.Default.Settings)
     )
 
     val visibleTabs = allTabs.filter { tab ->
         val featOk = tab.feature == null || tab.feature in enabledFeatures
-        val roleOk = when (user?.role) {
-            UserRole.KASIR.id -> tab.route in setOf(
-                Routes.TAB_POS, Routes.TAB_MENU, Routes.TAB_RIWAYAT
-            )
-            else -> true
-        }
-        featOk && roleOk
+        val permOk = tab.permission == null || Session.can(tab.permission)
+        featOk && permOk
     }
 
     val innerBackStack by innerNav.currentBackStackEntryAsState()
