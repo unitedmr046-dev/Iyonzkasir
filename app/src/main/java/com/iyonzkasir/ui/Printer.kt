@@ -15,7 +15,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -33,9 +35,11 @@ import androidx.navigation.NavHostController
 import com.iyonzkasir.*
 import com.iyonzkasir.data.*
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.OutputStream
+import java.lang.reflect.Method
 import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
@@ -55,12 +59,11 @@ object ESC {
     val SIZE_BIG = byteArrayOf(0x1D, 0x21, 0x22)
     val FEED = byteArrayOf(0x0A)
     val CUT = byteArrayOf(0x1D, 0x56, 0x00)
-    // 0xFA > 127, jadi harus explicit .toByte()
     val DRAWER = byteArrayOf(0x1B, 0x70, 0x00, 0x19, 0xFA.toByte())
 }
 
 // ═══════════════════════════════════════════════════════════
-// PRINTER SERVICE
+// PRINTER SERVICE — versi agresif untuk RPP02N
 // ═══════════════════════════════════════════════════════════
 object PrinterService {
     private var socket: BluetoothSocket? = null
@@ -69,12 +72,28 @@ object PrinterService {
 
     var lastError: String? = null
         private set
+    var lastStep: String = ""
+        private set
 
     fun isConnected(): Boolean = socket?.isConnected == true
+
+    private val SPP_UUIDS = listOf(
+        "00001101-0000-1000-8000-00805F9B34FB",
+        "00001101-0000-1000-8000-0002EE000002",
+        "00001110-0000-1000-8000-00805F9B34FB",
+        "0000ff01-0000-1000-8000-00805F9B34FB",
+        "e7810a71-73ae-499d-8c15-faa9aef0c3f2",
+        "8ce255c0-200a-11e0-ac64-0800200c9a66"
+    )
 
     suspend fun connect(context: Context, mac: String): Boolean = withContext(Dispatchers.IO) {
         try {
             disconnect()
+            lastError = null
+            lastStep = ""
+
+            // 1. Adapter
+            lastStep = "Cek Bluetooth"
             val adapter = getAdapter(context) ?: run {
                 lastError = "Bluetooth tidak tersedia"
                 return@withContext false
@@ -83,35 +102,109 @@ object PrinterService {
                 lastError = "Bluetooth belum dinyalakan"
                 return@withContext false
             }
-            val device = adapter.getRemoteDevice(mac)
-            val uuids = listOf(
-                java.util.UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"),
-                java.util.UUID.fromString("00001110-0000-1000-8000-00805F9B34FB")
-            )
-            var s: BluetoothSocket? = null
-            for (uuid in uuids) {
-                try {
-                    adapter.cancelDiscovery()
-                    val candidate = device.createRfcommSocketToServiceRecord(uuid)
-                    candidate.connect()
-                    s = candidate
-                    break
-                } catch (_: Exception) { }
+
+            // 2. Permission
+            lastStep = "Cek izin"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val granted = ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.BLUETOOTH_CONNECT
+                ) == PackageManager.PERMISSION_GRANTED
+                if (!granted) {
+                    lastError = "Izin Bluetooth belum diberikan"
+                    return@withContext false
+                }
             }
-            if (s == null) {
-                lastError = "Gagal konek ke printer. Pastikan sudah di-pair."
+
+            // 3. Device
+            lastStep = "Ambil device"
+            val device = try {
+                adapter.getRemoteDevice(mac)
+            } catch (e: Exception) {
+                lastError = "Alamat printer tidak valid"
                 return@withContext false
             }
-            socket = s
-            output = s.outputStream
-            connectedMac = mac
-            lastError = null
-            true
+
+            // 4. Cancel discovery
+            try { adapter.cancelDiscovery() } catch (_: Exception) {}
+
+            // 5. Coba connect — urutan: reflection dulu (paling reliable untuk RPP02N)
+            var s: BluetoothSocket? = null
+
+            // A. Reflection createRfcommSocket(channel)
+            lastStep = "Reflection method"
+            s = tryReflection(device)
+            if (s != null && s.isConnected) return@withContext finalize(s, mac)
+
+            // B. Standard SPP UUID (secure)
+            lastStep = "SPP UUID (secure)"
+            s = trySecureUuids(device)
+            if (s != null && s.isConnected) return@withContext finalize(s, mac)
+
+            // C. Insecure SPP UUID
+            lastStep = "SPP UUID (insecure)"
+            s = tryInsecureUuids(device)
+            if (s != null && s.isConnected) return@withContext finalize(s, mac)
+
+            lastError = "Gagal konek. Cek: printer nyala? tidak terhubung HP lain? kertas ada?"
+            return@withContext false
         } catch (e: Exception) {
-            lastError = "Error: ${e.message}"
+            lastError = "Error: ${e.message ?: e.javaClass.simpleName}"
             disconnect()
             false
         }
+    }
+
+    private suspend fun finalize(s: BluetoothSocket, mac: String): Boolean {
+        socket = s
+        output = s.outputStream
+        connectedMac = mac
+        delay(400)
+        lastStep = "Selesai"
+        lastError = null
+        return true
+    }
+
+    private fun tryReflection(device: BluetoothDevice): BluetoothSocket? {
+        val channels = intArrayOf(1, 2, 3, 4, 5, 6)
+        for (ch in channels) {
+            try {
+                val m: Method = device.javaClass.getMethod(
+                    "createRfcommSocket", Int::class.javaPrimitiveType!!
+                )
+                val s = m.invoke(device, ch) as BluetoothSocket
+                s.connect()
+                if (s.isConnected) return s
+                try { s.close() } catch (_: Exception) {}
+            } catch (_: Exception) { }
+        }
+        return null
+    }
+
+    private fun trySecureUuids(device: BluetoothDevice): BluetoothSocket? {
+        for (u in SPP_UUIDS) {
+            try {
+                val s = device.createRfcommSocketToServiceRecord(UUID.fromString(u))
+                s.connect()
+                if (s.isConnected) return s
+                try { s.close() } catch (_: Exception) {}
+            } catch (_: Exception) { }
+        }
+        return null
+    }
+
+    private fun tryInsecureUuids(device: BluetoothDevice): BluetoothSocket? {
+        for (u in SPP_UUIDS) {
+            try {
+                val m = device.javaClass.getMethod(
+                    "createInsecureRfcommSocketToServiceRecord", UUID::class.java
+                )
+                val s = m.invoke(device, UUID.fromString(u)) as BluetoothSocket
+                s.connect()
+                if (s.isConnected) return s
+                try { s.close() } catch (_: Exception) {}
+            } catch (_: Exception) { }
+        }
+        return null
     }
 
     fun disconnect() {
@@ -122,6 +215,10 @@ object PrinterService {
 
     suspend fun send(bytes: ByteArray): Boolean = withContext(Dispatchers.IO) {
         try {
+            if (socket?.isConnected != true) {
+                lastError = "Printer terputus"
+                return@withContext false
+            }
             output?.write(bytes)
             output?.flush()
             lastError = null
@@ -346,6 +443,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
     var connected by remember { mutableStateOf(PrinterService.isConnected()) }
     var message by remember { mutableStateOf<String?>(null) }
     var showPairList by remember { mutableStateOf(false) }
+    var connecting by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         printerMac = app.settingRepo.getPrinterMac()
@@ -356,7 +454,10 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { }
+    ) { result ->
+        if (result.values.all { it }) showPairList = true
+        else message = "Izin Bluetooth ditolak. Buka Setelan HP → Aplikasi → iyonzkasir → Izin → Bluetooth"
+    }
 
     Scaffold(
         topBar = {
@@ -370,9 +471,11 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
             )
         }
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp),
+        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp)
+            .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
 
+            // Status card
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = if (connected) BRAND_LIGHT
@@ -390,7 +493,8 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
                         Text(
-                            if (connected) "Terhubung"
+                            if (connecting) "Menghubungkan..."
+                            else if (connected) "Terhubung"
                             else if (printerMac.isBlank()) "Belum ada printer"
                             else "Terputus",
                             fontWeight = FontWeight.Bold,
@@ -404,6 +508,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Tombol aksi
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(
                     onClick = {
@@ -413,14 +518,15 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                                     Manifest.permission.BLUETOOTH_CONNECT)
                                 != PackageManager.PERMISSION_GRANTED) {
                                 needPerms.add(Manifest.permission.BLUETOOTH_CONNECT)
+                            }
+                            if (ContextCompat.checkSelfPermission(ctx,
+                                    Manifest.permission.BLUETOOTH_SCAN)
+                                != PackageManager.PERMISSION_GRANTED) {
                                 needPerms.add(Manifest.permission.BLUETOOTH_SCAN)
                             }
                         }
                         if (needPerms.isEmpty()) showPairList = true
-                        else {
-                            permLauncher.launch(needPerms.toTypedArray())
-                            showPairList = true
-                        }
+                        else permLauncher.launch(needPerms.toTypedArray())
                     },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = BRAND)
@@ -429,32 +535,94 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                     Spacer(Modifier.width(6.dp))
                     Text("Pilih Printer")
                 }
+
                 if (printerMac.isNotBlank()) {
+                    // Tombol SAMBUNG / BATAL — selalu bisa dipencet
                     OutlinedButton(
                         onClick = {
-                            scope.launch {
-                                if (PrinterService.isConnected()) {
-                                    PrinterService.disconnect()
+                            if (connecting) {
+                                // Batalkan
+                                PrinterService.disconnect()
+                                connecting = false
+                                connected = false
+                                message = "Dibatalkan. Coba lagi."
+                            } else if (connected) {
+                                // Putus
+                                PrinterService.disconnect()
+                                connected = false
+                                message = "Terputus"
+                            } else {
+                                // Sambung
+                                scope.launch {
+                                    connecting = true
                                     connected = false
-                                    message = "Terputus"
-                                } else {
+                                    message = "Menghubungkan... mohon tunggu"
+
+                                    // Auto-reset kalau stuck 30 detik
+                                    val timeoutJob = launch {
+                                        delay(30_000)
+                                        if (connecting) {
+                                            PrinterService.disconnect()
+                                            connecting = false
+                                            message = "❌ Timeout 30 detik. Coba lagi."
+                                        }
+                                    }
+
                                     val ok = PrinterService.connect(ctx, printerMac)
+                                    timeoutJob.cancel()
+                                    connecting = false
                                     connected = ok
-                                    message = if (ok) "Terhubung" else PrinterService.lastError
+                                    message = if (ok) "✅ Terhubung ke printer"
+                                    else "❌ ${PrinterService.lastError ?: "Gagal"} (step: ${PrinterService.lastStep})"
                                 }
                             }
                         },
                         modifier = Modifier.weight(1f)
                     ) {
-                        Icon(if (connected) Icons.Default.Close else Icons.Default.Link, null)
-                        Spacer(Modifier.width(6.dp))
-                        Text(if (connected) "Putus" else "Sambung")
+                        if (connecting) {
+                            CircularProgressIndicator(
+                                Modifier.size(16.dp),
+                                strokeWidth = 2.dp,
+                                color = BRAND
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text("Batal")
+                        } else if (connected) {
+                            Icon(Icons.Default.Close, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Putus")
+                        } else {
+                            Icon(Icons.Default.Link, null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Sambung")
+                        }
                     }
                 }
             }
 
-            Text("Ukuran Kertas", fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 8.dp))
+            // Info
+            Card(colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Column(Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("💡 Checklist RPP02N",
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("1. Printer NYALA (lampu hijau/biru)",
+                        style = MaterialTheme.typography.labelSmall)
+                    Text("2. Kertas thermal terpasang",
+                        style = MaterialTheme.typography.labelSmall)
+                    Text("3. Tidak terhubung ke HP lain",
+                        style = MaterialTheme.typography.labelSmall)
+                    Text("4. Sudah di-pair di Setelan HP",
+                        style = MaterialTheme.typography.labelSmall)
+                    Text("5. Jauhkan dari WiFi router",
+                        style = MaterialTheme.typography.labelSmall)
+                }
+            }
+
+            // Ukuran kertas
+            Text("Ukuran Kertas", fontWeight = FontWeight.SemiBold)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(58, 80).forEach { w ->
                     FilterChip(
@@ -468,6 +636,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Auto print
             Card {
                 Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -486,22 +655,20 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Test print
             OutlinedButton(
                 onClick = {
                     scope.launch {
                         if (!PrinterService.isConnected()) {
-                            val ok = PrinterService.connect(ctx, printerMac)
-                            connected = ok
-                            if (!ok) {
-                                message = PrinterService.lastError ?: "Gagal konek"
-                                return@launch
-                            }
+                            message = "Sambungkan printer dulu"
+                            return@launch
                         }
                         val ok = cetakTest(app.settingRepo)
-                        message = if (ok) "Test print terkirim" else PrinterService.lastError
+                        message = if (ok) "✅ Test print terkirim"
+                        else "❌ ${PrinterService.lastError ?: "Gagal cetak"}"
                     }
                 },
-                enabled = printerMac.isNotBlank(),
+                enabled = printerMac.isNotBlank() && connected,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Icon(Icons.Default.Print, null)
@@ -509,6 +676,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 Text("Test Print")
             }
 
+            // Cash drawer
             if (FeatureManager.isEnabled(FeatureKey.CASH_DRAWER)) {
                 OutlinedButton(
                     onClick = {
@@ -518,7 +686,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                             else PrinterService.lastError
                         }
                     },
-                    enabled = printerMac.isNotBlank(),
+                    enabled = printerMac.isNotBlank() && connected,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.PointOfSale, null)
@@ -527,15 +695,23 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Pesan
             message?.let {
-                Spacer(Modifier.height(8.dp))
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        containerColor = when {
+                            it.startsWith("✅") || it.startsWith("Sinyal") -> BRAND_LIGHT
+                            it.startsWith("❌") || it.contains("Gagal") || it.contains("Timeout") ->
+                                MaterialTheme.colorScheme.errorContainer
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        }
                     )
                 ) {
                     Text(it, modifier = Modifier.padding(12.dp),
-                        style = MaterialTheme.typography.bodySmall)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (it.startsWith("❌") || it.contains("Gagal") || it.contains("Timeout"))
+                            MaterialTheme.colorScheme.onErrorContainer
+                        else MaterialTheme.colorScheme.onSurface)
                 }
             }
         }
@@ -550,10 +726,24 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 scope.launch {
                     app.settingRepo.setPrinterMac(device.address)
                     app.settingRepo.setPrinterNama(printerNama)
+                    connecting = true
+                    message = "Menghubungkan ke ${printerNama}..."
+
+                    val timeoutJob = launch {
+                        delay(30_000)
+                        if (connecting) {
+                            PrinterService.disconnect()
+                            connecting = false
+                            message = "❌ Timeout 30 detik. Coba lagi."
+                        }
+                    }
+
                     val ok = PrinterService.connect(ctx, device.address)
+                    timeoutJob.cancel()
+                    connecting = false
                     connected = ok
-                    message = if (ok) "Terhubung ke $printerNama"
-                    else PrinterService.lastError
+                    message = if (ok) "✅ Terhubung ke $printerNama"
+                    else "❌ ${PrinterService.lastError ?: "Gagal connect"} (step: ${PrinterService.lastStep})"
                 }
                 showPairList = false
             }
@@ -585,7 +775,7 @@ private fun PairPickerDialog(
             }
             devices = adapter.bondedDevices.toList().sortedBy { it.name ?: "" }
             if (devices.isEmpty())
-                error = "Belum ada perangkat yang di-pair.\nPair printer dulu dari Setelan HP > Bluetooth."
+                error = "Belum ada perangkat yang di-pair.\nBuka Setelan HP → Bluetooth → Pair printer dulu."
         } catch (e: SecurityException) {
             error = "Izin Bluetooth ditolak"
         } catch (e: Exception) {
