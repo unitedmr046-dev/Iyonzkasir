@@ -16,7 +16,7 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ═══════ BRAND & WARNA ═══════
+// ═══════ BRAND ═══════
 val BRAND = Color(0xFFFF6B35)
 val BRAND_LIGHT = Color(0xFFFFE4D6)
 val BRAND_DARK = Color(0xFFC44E1F)
@@ -110,11 +110,23 @@ enum class PaymentMethod(val id: String, val label: String) {
     }
 }
 
+enum class MemberTier(val id: String, val label: String, val minBelanja: Int) {
+    BASIC("BASIC", "Basic", 0),
+    SILVER("SILVER", "Silver", 500_000),
+    GOLD("GOLD", "Gold", 2_000_000),
+    PLATINUM("PLATINUM", "Platinum", 5_000_000);
+
+    companion object {
+        fun fromId(id: String) = values().firstOrNull { it.id == id } ?: BASIC
+        fun fromTotalBelanja(total: Int): MemberTier =
+            values().reversed().firstOrNull { total >= it.minBelanja } ?: BASIC
+    }
+}
+
 // ═══════ FEATURE KEYS ═══════
 enum class FeatureKey(
     val key: String, val label: String, val kategori: String, val deskripsi: String = ""
 ) {
-    // POS
     NOMOR_MEJA("pos_nomor_meja", "Nomor Meja", "POS", "Kelola nomor meja untuk F&B"),
     KITCHEN_PRINT("pos_kitchen_print", "Kitchen Print", "POS", "Cetak pesanan ke dapur"),
     MODIFIER("pos_modifier", "Catatan / Modifier Item", "POS", "Catatan per item"),
@@ -128,13 +140,11 @@ enum class FeatureKey(
     VOID_REFUND("pos_void_refund", "Void / Refund", "POS", "Batalkan transaksi"),
     HOLD_ORDER("pos_hold_order", "Hold Order", "POS", "Tahan pesanan sementara"),
 
-    // Inventaris
     POTONG_STOK("inv_potong_stok", "Potong Stok Otomatis", "Inventaris", "Kurangi stok saat jual"),
     LOW_STOCK_ALERT("inv_low_stock", "Alert Stok Menipis", "Inventaris", "Notifikasi stok minim"),
     RESEP("inv_resep", "Resep / Bahan Baku", "Inventaris", "Potong bahan saat jual"),
     PURCHASE_ORDER("inv_purchase_order", "Purchase Order", "Inventaris", "Order ke supplier"),
 
-    // Laporan
     LAPORAN_HARIAN("rep_harian", "Laporan Harian", "Laporan", "Ringkasan penjualan"),
     LABA_PER_PRODUK("rep_laba_produk", "Laba per Produk", "Laporan", "Analisa margin"),
     SHIFT_KASIR("rep_shift", "Shift Kasir", "Laporan", "Buka & tutup shift"),
@@ -142,19 +152,16 @@ enum class FeatureKey(
     EXPORT_EXCEL("rep_export_excel", "Export Excel / CSV", "Laporan", "Export ke Excel"),
     EXPORT_PDF("rep_export_pdf", "Export PDF", "Laporan", "Cetak PDF"),
 
-    // CRM
-    MEMBER("crm_member", "Member & Poin", "CRM", "Sistem membership"),
-    VOUCHER("crm_voucher", "Voucher", "CRM", "Kode voucher"),
-    HUTANG_PELANGGAN("crm_hutang_pelanggan", "Hutang Pelanggan", "CRM", "Catat hutang"),
+    MEMBER("crm_member", "Member & Poin", "CRM", "Sistem membership & poin"),
+    VOUCHER("crm_voucher", "Voucher", "CRM", "Kode voucher / promo"),
+    HUTANG_PELANGGAN("crm_hutang_pelanggan", "Hutang Pelanggan", "CRM", "Catat hutang pelanggan"),
     HUTANG_SUPPLIER("crm_hutang_supplier", "Hutang Supplier", "CRM", "Hutang ke supplier"),
 
-    // Hardware
     PRINTER_BT("hw_printer_bt", "Printer Bluetooth", "Hardware", "Cetak struk via BT"),
     PRINTER_USB("hw_printer_usb", "Printer USB", "Hardware", "Cetak struk via USB"),
     CASH_DRAWER("hw_cash_drawer", "Cash Drawer", "Hardware", "Buka laci otomatis"),
     SCANNER_HW("hw_scanner", "Scanner Hardware", "Hardware", "Scanner barcode fisik"),
 
-    // F&B / Laundry / Jasa
     STATUS_DAPUR("fnb_status_dapur", "Status Dapur", "F&B", "Track status pesanan"),
     STATUS_LAUNDRY("laundry_status", "Status Laundry", "Laundry", "Tracking cucian"),
     ESTIMASI_SELESAI("laundry_estimasi", "Estimasi Selesai", "Laundry", "Tanggal selesai"),
@@ -163,7 +170,6 @@ enum class FeatureKey(
     JADWAL_SERVIS("jasa_jadwal", "Jadwal Servis", "Jasa", "Atur jadwal"),
     REMINDER("jasa_reminder", "Reminder Berkala", "Jasa", "Ingatkan pelanggan"),
 
-    // Backup & Komunikasi & Keamanan
     BACKUP_MANUAL("bk_manual", "Backup Manual", "Backup", "Backup ke storage"),
     BACKUP_OTOMATIS("bk_auto", "Backup Otomatis", "Backup", "Backup terjadwal"),
     BACKUP_CLOUD("bk_cloud", "Backup Cloud", "Backup", "Backup ke cloud"),
@@ -176,19 +182,21 @@ enum class FeatureKey(
     }
 }
 
-// Preset feature per jenis usaha
+// ═══════ BUSINESS PRESET ═══════
 val BusinessType.defaultFeatures: Set<FeatureKey>
     get() = when (this) {
         BusinessType.WARUNG -> setOf(
             FeatureKey.OPEN_BILL, FeatureKey.DISKON, FeatureKey.VOID_REFUND,
-            FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT
         )
         BusinessType.RETAIL -> setOf(
             FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
             FeatureKey.LOW_STOCK_ALERT, FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
             FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.PRINTER_BT,
-            FeatureKey.EXPORT_EXCEL
+            FeatureKey.EXPORT_EXCEL, FeatureKey.MEMBER, FeatureKey.VOUCHER,
+            FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT
         )
         BusinessType.FNB -> setOf(
             FeatureKey.NOMOR_MEJA, FeatureKey.KITCHEN_PRINT, FeatureKey.MODIFIER,
@@ -196,28 +204,32 @@ val BusinessType.defaultFeatures: Set<FeatureKey>
             FeatureKey.DISKON, FeatureKey.PAJAK, FeatureKey.VOID_REFUND,
             FeatureKey.HOLD_ORDER, FeatureKey.STATUS_DAPUR, FeatureKey.RESEP,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
-            FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR
+            FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
+            FeatureKey.MEMBER, FeatureKey.VOUCHER, FeatureKey.WHATSAPP_INTENT
         )
         BusinessType.LAUNDRY -> setOf(
             FeatureKey.STATUS_LAUNDRY, FeatureKey.ESTIMASI_SELESAI,
             FeatureKey.DP_PEMBAYARAN, FeatureKey.PICKUP_DELIVERY, FeatureKey.OPEN_BILL,
-            FeatureKey.WHATSAPP_INTENT, FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT
+            FeatureKey.WHATSAPP_INTENT, FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN
         )
         BusinessType.TOKO_BANGUNAN -> setOf(
             FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
             FeatureKey.LOW_STOCK_ALERT, FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
             FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
             FeatureKey.OPEN_BILL, FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
-            FeatureKey.EXPORT_EXCEL, FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR
+            FeatureKey.EXPORT_EXCEL, FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT
         )
         BusinessType.JASA -> setOf(
             FeatureKey.JADWAL_SERVIS, FeatureKey.REMINDER, FeatureKey.WHATSAPP_INTENT,
-            FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN
         )
         BusinessType.CUSTOM -> emptySet()
     }
 
-// ═══════ PERMISSION KEYS (izin granular per-user) ═══════
+// ═══════ PERMISSIONS ═══════
 enum class PermissionKey(
     val key: String, val label: String, val kategori: String, val deskripsi: String = ""
 ) {
@@ -239,6 +251,10 @@ enum class PermissionKey(
     LIHAT_LAPORAN("perm_laporan", "Lihat Laporan", "Laporan", "Akses semua laporan"),
     EXPORT_DATA("perm_export", "Export Data", "Laporan", "Export ke Excel/PDF"),
 
+    KELOLA_MEMBER("perm_member", "Kelola Member & Poin", "CRM", "Tambah/edit member & poin"),
+    KELOLA_VOUCHER("perm_voucher", "Kelola Voucher", "CRM", "Buat & kelola kode voucher"),
+    KELOLA_HUTANG("perm_hutang", "Kelola Hutang Pelanggan", "CRM", "Catat & tagih hutang"),
+
     KELOLA_USER("perm_user", "Kelola Pengguna", "Admin", "Tambah/edit user & izin"),
     KELOLA_FITUR("perm_fitur", "Kelola Fitur", "Admin", "Aktif/matikan fitur"),
     PROFIL_TOKO("perm_profil", "Profil Toko", "Admin", "Ubah info toko"),
@@ -251,7 +267,6 @@ enum class PermissionKey(
     }
 }
 
-// Preset permission per role
 val UserRole.defaultPermissions: Set<PermissionKey>
     get() = when (this) {
         UserRole.OWNER -> PermissionKey.values().toSet()
@@ -260,29 +275,43 @@ val UserRole.defaultPermissions: Set<PermissionKey>
             PermissionKey.KELOLA_MENU, PermissionKey.UBAH_HARGA,
             PermissionKey.JUAL, PermissionKey.DISKON, PermissionKey.VOID_REFUND,
             PermissionKey.OPEN_BILL, PermissionKey.STOCK_OPNAME, PermissionKey.KELOLA_STOK,
-            PermissionKey.LIHAT_LAPORAN, PermissionKey.EXPORT_DATA
+            PermissionKey.LIHAT_LAPORAN, PermissionKey.EXPORT_DATA,
+            PermissionKey.KELOLA_MEMBER, PermissionKey.KELOLA_VOUCHER, PermissionKey.KELOLA_HUTANG
         )
         UserRole.KASIR -> setOf(
             PermissionKey.LIHAT_RIWAYAT,
-            PermissionKey.JUAL, PermissionKey.OPEN_BILL
+            PermissionKey.JUAL, PermissionKey.OPEN_BILL,
+            PermissionKey.KELOLA_MEMBER, PermissionKey.KELOLA_HUTANG
         )
     }
 
-// ═══════ FEATURE MANAGER ═══════
+// ═══════ MANAGERS ═══════
 object FeatureManager {
     private val _enabled = MutableStateFlow<Set<FeatureKey>>(emptySet())
     val enabled: StateFlow<Set<FeatureKey>> = _enabled.asStateFlow()
-
-    fun isEnabled(feature: FeatureKey): Boolean = _enabled.value.contains(feature)
+    fun isEnabled(f: FeatureKey) = _enabled.value.contains(f)
     fun update(features: Set<FeatureKey>) { _enabled.value = features }
 }
 
-// ═══════ THEME MANAGER ═══════
 object ThemeManager {
     var mode by mutableStateOf(ThemeMode.SYSTEM)
         private set
-
     fun update(m: ThemeMode) { mode = m }
+}
+
+// ═══════ LOYALTY CONFIG ═══════
+object LoyaltyConfig {
+    /** Rp X belanja → 1 poin */
+    const val POIN_PER_RUPIAH = 10_000
+    /** 1 poin = Rp X diskon */
+    const val RUPIAH_PER_POIN = 100
+
+    fun hitungPoinDidapat(totalBelanja: Int): Int =
+        if (POIN_PER_RUPIAH > 0) totalBelanja / POIN_PER_RUPIAH else 0
+
+    fun poinKeRupiah(poin: Int): Int = poin * RUPIAH_PER_POIN
+    fun rupiahKePoin(rupiah: Int): Int = if (RUPIAH_PER_POIN > 0)
+        rupiah / RUPIAH_PER_POIN else 0
 }
 
 // ═══════ TEMA COMPOSABLE ═══════
