@@ -13,9 +13,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -67,13 +69,10 @@ class KasirViewModel(
     var diskonValue by mutableStateOf(0)
     var pajakPersen by mutableStateOf(0)
 
-    // CRM
     var selectedMember by mutableStateOf<Member?>(null)
     var voucherKode by mutableStateOf("")
     var voucherAmount by mutableStateOf(0)
     var voucherError by mutableStateOf<String?>(null)
-
-    // Poin yang mau dipakai
     var poinDipakai by mutableStateOf(0)
 
     private val _cart = MutableStateFlow<Map<String, CartLine>>(emptyMap())
@@ -91,7 +90,6 @@ class KasirViewModel(
     fun hitungPajak(afterDiskon: Int): Int =
         afterDiskon * pajakPersen.coerceIn(0, 100) / 100
 
-    /** Total akhir setelah diskon, voucher, poin, dan pajak. */
     fun hitungTotal(sub: Int): Int {
         val diskon = hitungDiskon(sub)
         val afterDiskon = (sub - diskon).coerceAtLeast(0)
@@ -140,10 +138,7 @@ class KasirViewModel(
             pajakPersen = order.pajakPersen
             voucherKode = order.voucherKode
             voucherAmount = order.voucherAmount
-            // load member kalau ada
-            if (order.memberId > 0) {
-                selectedMember = crmRepo.getMember(order.memberId)
-            }
+            if (order.memberId > 0) selectedMember = crmRepo.getMember(order.memberId)
             _cart.value = items.associate { it ->
                 val key = "${it.menuId}|${it.catatan}"
                 val menuItem = repo.getMenu(it.menuId) ?: MenuItem(
@@ -154,14 +149,11 @@ class KasirViewModel(
         }
     }
 
-    // ── Member picker ──
     fun setMember(m: Member?) {
         selectedMember = m
-        // Reset poin dipakai kalau ganti member
         if (m == null || poinDipakai > m.poin) poinDipakai = 0
     }
 
-    // ── Voucher ──
     fun applyVoucher(kode: String, sub: Int) {
         viewModelScope.launch {
             voucherError = null
@@ -245,10 +237,7 @@ class KasirViewModel(
         }
     }
 
-    fun checkout(
-        metode: String, dibayar: Int,
-        onDone: suspend (Long) -> Unit
-    ) {
+    fun checkout(metode: String, dibayar: Int, onDone: suspend (Long) -> Unit) {
         val lines = cart.value
         if (lines.isEmpty()) return
         viewModelScope.launch {
@@ -266,11 +255,8 @@ class KasirViewModel(
             val existingId = editingOrderId
             val shiftId = repo.getActiveShiftId() ?: 0L
             val member = selectedMember
-
-            // Hitung poin didapat (dari total yang dibayar)
-            val poinDidapat = if (member != null) {
-                LoyaltyConfig.hitungPoinDidapat(totalInt)
-            } else 0
+            val poinDidapat = if (member != null)
+                LoyaltyConfig.hitungPoinDidapat(totalInt) else 0
 
             val order = Order(
                 id = existingId ?: 0,
@@ -295,26 +281,15 @@ class KasirViewModel(
             )
             val id: Long = if (existingId != null) {
                 repo.updateOrderWithItems(order, items); existingId
-            } else {
-                repo.simpanOrder(order, items)
-            }
+            } else repo.simpanOrder(order, items)
 
-            // ── Update member: tambah poin, kurangi poin dipakai, tambah hutang kalau metode HUTANG ──
             if (member != null) {
                 try {
-                    // Redeem poin dulu (kalau ada)
-                    if (poinDipakai > 0) {
-                        crmRepo.redeemPoin(member.id, poinDipakai)
-                    }
-                    // Proses order (earn poin + hutang)
+                    if (poinDipakai > 0) crmRepo.redeemPoin(member.id, poinDipakai)
                     crmRepo.processOrder(member.id, order.copy(id = id))
-                    // Tandai voucher terpakai
-                    if (voucherKode.isNotBlank()) {
-                        crmRepo.markVoucherUsed(voucherKode)
-                    }
+                    if (voucherKode.isNotBlank()) crmRepo.markVoucherUsed(voucherKode)
                 } catch (_: Exception) {}
             }
-
             resetOrder()
             onDone(id)
         }
@@ -435,8 +410,7 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
                         if (order != null) {
                             if (!PrinterService.isConnected()) {
                                 val mac = app.settingRepo.getPrinterMac()
-                                if (mac.isNotBlank())
-                                    PrinterService.connect(app, mac)
+                                if (mac.isNotBlank()) PrinterService.connect(app, mac)
                             }
                             cetakStruk(app.settingRepo, order, items)
                         }
@@ -1176,10 +1150,9 @@ fun BayarScreen(
         }
     ) { pad ->
         Column(Modifier.padding(pad).padding(16.dp).fillMaxSize()
-            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+            .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-            // ── MEMBER PICKER ──
             if (crmEnabled) {
                 Card(colors = CardDefaults.cardColors(
                     containerColor = if (vm.selectedMember != null) BRAND_LIGHT
@@ -1190,8 +1163,7 @@ fun BayarScreen(
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             if (vm.selectedMember == null) {
-                                Text("Tanpa Member",
-                                    fontWeight = FontWeight.SemiBold)
+                                Text("Tanpa Member", fontWeight = FontWeight.SemiBold)
                                 Text("Tap untuk pilih member",
                                     style = MaterialTheme.typography.bodySmall)
                             } else {
@@ -1218,7 +1190,6 @@ fun BayarScreen(
                 }
             }
 
-            // ── VOUCHER ──
             if (voucherEnabled) {
                 Card {
                     Column(Modifier.padding(12.dp)) {
@@ -1247,9 +1218,7 @@ fun BayarScreen(
                             Spacer(Modifier.width(8.dp))
                             if (vm.voucherKode.isBlank()) {
                                 Button(
-                                    onClick = {
-                                        vm.applyVoucher(voucherInput, subtotal)
-                                    },
+                                    onClick = { vm.applyVoucher(voucherInput, subtotal) },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = BRAND),
                                     enabled = voucherInput.isNotBlank()
@@ -1276,7 +1245,6 @@ fun BayarScreen(
                 }
             }
 
-            // ── POIN REDEEM ──
             if (vm.selectedMember != null && vm.selectedMember!!.poin > 0) {
                 Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                     Row(Modifier.fillMaxWidth().padding(12.dp),
@@ -1284,8 +1252,7 @@ fun BayarScreen(
                         Icon(Icons.Default.Star, null, tint = BRAND)
                         Spacer(Modifier.width(8.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("Tukar Poin",
-                                fontWeight = FontWeight.SemiBold)
+                            Text("Tukar Poin", fontWeight = FontWeight.SemiBold)
                             Text(
                                 if (vm.poinDipakai > 0)
                                     "${vm.poinDipakai} poin = ${poinRupiah.rupiah()}"
@@ -1299,13 +1266,10 @@ fun BayarScreen(
                 }
             }
 
-            // ── RINGKASAN ──
             Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                 Column(Modifier.padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    if (subtotal > 0) {
-                        RingkasRow("Subtotal", subtotal.rupiah())
-                    }
+                    if (subtotal > 0) RingkasRow("Subtotal", subtotal.rupiah())
                     if (diskonAmount > 0)
                         RingkasRow("Diskon", "- ${diskonAmount.rupiah()}", DANGER)
                     if (vm.voucherAmount > 0)
@@ -1326,7 +1290,6 @@ fun BayarScreen(
                 }
             }
 
-            // ── METODE BAYAR ──
             Text("Metode bayar", fontWeight = FontWeight.SemiBold)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val methods = if (vm.selectedMember != null && crmEnabled)
@@ -1344,7 +1307,6 @@ fun BayarScreen(
                     color = DANGER, style = MaterialTheme.typography.bodySmall)
             }
 
-            // ── CASH ──
             if (metode == PaymentMethod.CASH.id) {
                 OutlinedTextField(dibayarText,
                     { dibayarText = it.filter { c -> c.isDigit() } },
@@ -1374,19 +1336,14 @@ fun BayarScreen(
         }
     }
 
-    // ── MEMBER PICKER DIALOG ──
     if (showMemberPicker) {
         MemberPickerDialog(
             crmRepo = (ctx.applicationContext as IyonzApp).crmRepo,
             onDismiss = { showMemberPicker = false },
-            onPick = { m ->
-                vm.setMember(m)
-                showMemberPicker = false
-            }
+            onPick = { m -> vm.setMember(m); showMemberPicker = false }
         )
     }
 
-    // ── POIN DIALOG ──
     if (showPoinDialog && vm.selectedMember != null) {
         PoinPakaiDialog(
             member = vm.selectedMember!!,
@@ -1396,10 +1353,7 @@ fun BayarScreen(
                 LoyaltyConfig.rupiahKePoin(afterVoucher)
             ),
             onDismiss = { showPoinDialog = false },
-            onConfirm = { p ->
-                vm.poinDipakai = p
-                showPoinDialog = false
-            }
+            onConfirm = { p -> vm.poinDipakai = p; showPoinDialog = false }
         )
     }
 }
@@ -1447,11 +1401,8 @@ private fun MemberPickerDialog(
     var showAddMember by remember { mutableStateOf(false) }
 
     LaunchedEffect(search) {
-        results = if (search.isBlank()) {
-            crmRepo.activeMembers.first()
-        } else {
-            crmRepo.searchMember(search)
-        }
+        results = if (search.isBlank()) crmRepo.activeMembers.first()
+        else crmRepo.searchMember(search)
     }
 
     AlertDialog(
@@ -1489,18 +1440,14 @@ private fun MemberPickerDialog(
                 } else {
                     LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         items(results, key = { it.id }) { m ->
-                            Card(
-                                Modifier.fillMaxWidth()
-                                    .clickable { onPick(m) }
-                            ) {
+                            Card(Modifier.fillMaxWidth().clickable { onPick(m) }) {
                                 Row(Modifier.padding(10.dp),
                                     verticalAlignment = Alignment.CenterVertically) {
                                     Box(Modifier.size(36.dp).clip(CircleShape)
                                         .background(BRAND_LIGHT),
                                         contentAlignment = Alignment.Center) {
                                         Text(m.nama.take(1).uppercase(),
-                                            color = BRAND,
-                                            fontWeight = FontWeight.Bold)
+                                            color = BRAND, fontWeight = FontWeight.Bold)
                                     }
                                     Spacer(Modifier.width(10.dp))
                                     Column(Modifier.weight(1f)) {
@@ -1820,9 +1767,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 if (MenuPhotoManager.isInternalPath(fotoUri)) {
                     MenuPhotoManager.deleteByPath(fotoUri)
                 }
-                val internal = MenuPhotoManager.copyToInternal(
-                    ctx, uri, menuId ?: 0L
-                )
+                val internal = MenuPhotoManager.copyToInternal(ctx, uri, menuId ?: 0L)
                 fotoUri = internal ?: uri.toString()
             }
         }
@@ -1999,8 +1944,7 @@ private fun RiwayatCard(o: Order, onClick: () -> Unit) {
                         if (o.pajakAmount > 0) append("PPN ${o.pajakAmount.rupiah()}")
                     }.trim()
                     if (extras.isNotBlank()) {
-                        Text(extras,
-                            style = MaterialTheme.typography.labelSmall,
+                        Text(extras, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -2124,10 +2068,7 @@ private fun OrderDetailDialog(
                 }
 
                 Spacer(Modifier.height(12.dp))
-                OutlinedButton(
-                    onClick = onCetak,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                OutlinedButton(onClick = onCetak, modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.Print, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Cetak Ulang Struk")
