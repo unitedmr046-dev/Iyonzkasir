@@ -207,11 +207,22 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Backup & Restore
+            if (Session.can(PermissionKey.BACKUP_RESTORE)) {
+                item {
+                    SectionHeader("Backup & Restore")
+                    SettingsItem("Backup & Restore", Icons.Default.Backup,
+                        subtitle = "Simpan / pulihkan data ke file") {
+                        nav.navigate(Routes.BACKUP)
+                    }
+                }
+            }
+
             // Tentang
             item {
                 SectionHeader("Tentang")
                 SettingsItem("Tentang Aplikasi", Icons.Default.Info,
-                    subtitle = "iyonzkasir v0.3.0") {
+                    subtitle = "iyonzkasir v0.4.0") {
                     nav.navigate(Routes.TENTANG)
                 }
             }
@@ -219,7 +230,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.3.0 • Made with ❤️",
+                    Text("iyonzkasir v0.4.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -654,7 +665,7 @@ fun TentangRoute(nav: NavHostController) {
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.3.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.4.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Text(
