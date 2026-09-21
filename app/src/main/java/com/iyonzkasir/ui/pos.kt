@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -48,7 +49,10 @@ data class CartLine(
     val key: String, val menu: MenuItem, val qty: Int, val catatan: String = ""
 ) { val subtotal: Int get() = menu.harga * qty }
 
-class KasirViewModel(private val repo: PosRepository) : ViewModel() {
+class KasirViewModel(
+    private val repo: PosRepository,
+    private val crmRepo: CrmRepository
+) : ViewModel() {
     val menu: StateFlow<List<MenuItem>> = repo.menu
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -62,6 +66,15 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
     var diskonTipe by mutableStateOf("NONE")
     var diskonValue by mutableStateOf(0)
     var pajakPersen by mutableStateOf(0)
+
+    // CRM
+    var selectedMember by mutableStateOf<Member?>(null)
+    var voucherKode by mutableStateOf("")
+    var voucherAmount by mutableStateOf(0)
+    var voucherError by mutableStateOf<String?>(null)
+
+    // Poin yang mau dipakai
+    var poinDipakai by mutableStateOf(0)
 
     private val _cart = MutableStateFlow<Map<String, CartLine>>(emptyMap())
     val cart: StateFlow<List<CartLine>> = _cart.map { it.values.toList() }
@@ -77,10 +90,17 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
     }
     fun hitungPajak(afterDiskon: Int): Int =
         afterDiskon * pajakPersen.coerceIn(0, 100) / 100
+
+    /** Total akhir setelah diskon, voucher, poin, dan pajak. */
     fun hitungTotal(sub: Int): Int {
-        val d = hitungDiskon(sub); val a = sub - d
-        return a + hitungPajak(a)
+        val diskon = hitungDiskon(sub)
+        val afterDiskon = (sub - diskon).coerceAtLeast(0)
+        val afterVoucher = (afterDiskon - voucherAmount).coerceAtLeast(0)
+        val afterPoin = (afterVoucher - poinKeRupiah(poinDipakai)).coerceAtLeast(0)
+        return afterPoin + hitungPajak(afterPoin)
     }
+
+    fun poinKeRupiah(poin: Int) = LoyaltyConfig.poinKeRupiah(poin)
 
     fun add(menu: MenuItem, catatan: String = "") {
         val key = "${menu.id}|$catatan"
@@ -101,6 +121,9 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
         nomorMeja = ""; tipeOrder = TipeOrder.DINE_IN.id; namaPelanggan = ""
         editingOrderId = null
         diskonTipe = "NONE"; diskonValue = 0; pajakPersen = 0
+        selectedMember = null
+        voucherKode = ""; voucherAmount = 0; voucherError = null
+        poinDipakai = 0
         clearCart()
     }
 
@@ -115,6 +138,12 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
             diskonTipe = order.diskonTipe
             diskonValue = order.diskonValue
             pajakPersen = order.pajakPersen
+            voucherKode = order.voucherKode
+            voucherAmount = order.voucherAmount
+            // load member kalau ada
+            if (order.memberId > 0) {
+                selectedMember = crmRepo.getMember(order.memberId)
+            }
             _cart.value = items.associate { it ->
                 val key = "${it.menuId}|${it.catatan}"
                 val menuItem = repo.getMenu(it.menuId) ?: MenuItem(
@@ -125,14 +154,70 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
         }
     }
 
+    // ── Member picker ──
+    fun setMember(m: Member?) {
+        selectedMember = m
+        // Reset poin dipakai kalau ganti member
+        if (m == null || poinDipakai > m.poin) poinDipakai = 0
+    }
+
+    // ── Voucher ──
+    fun applyVoucher(kode: String, sub: Int) {
+        viewModelScope.launch {
+            voucherError = null
+            val k = kode.trim().uppercase()
+            if (k.isBlank()) {
+                voucherKode = ""; voucherAmount = 0; return@launch
+            }
+            val v = crmRepo.getVoucher(k)
+            if (v == null) {
+                voucherError = "Kode nggak ditemukan"
+                voucherKode = ""; voucherAmount = 0
+                return@launch
+            }
+            val now = System.currentTimeMillis()
+            when {
+                !v.aktif -> { voucherError = "Voucher tidak aktif"; return@launch }
+                v.kuota > 0 && v.terpakai >= v.kuota -> {
+                    voucherError = "Kuota habis"; return@launch
+                }
+                v.tglAkhir > 0 && v.tglAkhir < now -> {
+                    voucherError = "Voucher kadaluarsa"; return@launch
+                }
+                v.tglMulai > 0 && v.tglMulai > now -> {
+                    voucherError = "Voucher belum berlaku"; return@launch
+                }
+                sub < v.minBelanja -> {
+                    voucherError = "Min belanja ${v.minBelanja.rupiah()}"
+                    return@launch
+                }
+            }
+            val amount = if (v.tipe == "PERSEN") {
+                val raw = sub * v.value / 100
+                if (v.maxDiskon > 0) raw.coerceAtMost(v.maxDiskon) else raw
+            } else {
+                v.value.coerceAtMost(sub)
+            }
+            voucherKode = k
+            voucherAmount = amount
+        }
+    }
+
+    fun clearVoucher() {
+        voucherKode = ""; voucherAmount = 0; voucherError = null
+    }
+
     fun simpanOpenBill(onDone: () -> Unit) {
         val lines = cart.value
         if (lines.isEmpty()) return
         viewModelScope.launch {
             val sub = lines.sumOf { it.subtotal }
             val diskon = hitungDiskon(sub)
-            val pajak = hitungPajak(sub - diskon)
-            val totalInt = sub - diskon + pajak
+            val afterDiskon = (sub - diskon).coerceAtLeast(0)
+            val afterVoucher = (afterDiskon - voucherAmount).coerceAtLeast(0)
+            val afterPoin = (afterVoucher - poinKeRupiah(poinDipakai)).coerceAtLeast(0)
+            val pajak = hitungPajak(afterPoin)
+            val totalInt = afterPoin + pajak
             val items = lines.map {
                 OrderItem(0, 0, it.menu.id, it.menu.nama, it.menu.harga, it.qty, it.catatan)
             }
@@ -146,10 +231,13 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
                 subtotal = sub,
                 diskonTipe = diskonTipe, diskonValue = diskonValue,
                 diskonAmount = diskon,
+                voucherKode = voucherKode, voucherAmount = voucherAmount,
                 pajakPersen = pajakPersen, pajakAmount = pajak,
                 total = totalInt,
                 status = OrderStatus.OPEN.id,
-                shiftId = shiftId
+                shiftId = shiftId,
+                memberId = selectedMember?.id ?: 0,
+                memberNama = selectedMember?.nama ?: ""
             )
             if (existingId != null) repo.updateOrderWithItems(order, items)
             else repo.simpanOrder(order, items)
@@ -157,40 +245,78 @@ class KasirViewModel(private val repo: PosRepository) : ViewModel() {
         }
     }
 
-    fun checkout(metode: String, dibayar: Int, onDone: (Long) -> Unit) {
+    fun checkout(
+        metode: String, dibayar: Int,
+        onDone: suspend (Long) -> Unit
+    ) {
         val lines = cart.value
         if (lines.isEmpty()) return
         viewModelScope.launch {
             val sub = lines.sumOf { it.subtotal }
             val diskon = hitungDiskon(sub)
-            val pajak = hitungPajak(sub - diskon)
-            val totalInt = sub - diskon + pajak
+            val afterDiskon = (sub - diskon).coerceAtLeast(0)
+            val afterVoucher = (afterDiskon - voucherAmount).coerceAtLeast(0)
+            val afterPoin = (afterVoucher - poinKeRupiah(poinDipakai)).coerceAtLeast(0)
+            val pajak = hitungPajak(afterPoin)
+            val totalInt = afterPoin + pajak
             val items = lines.map {
                 OrderItem(0, 0, it.menu.id, it.menu.nama, it.menu.harga, it.qty, it.catatan)
             }
             val u = Session.current
             val existingId = editingOrderId
             val shiftId = repo.getActiveShiftId() ?: 0L
+            val member = selectedMember
+
+            // Hitung poin didapat (dari total yang dibayar)
+            val poinDidapat = if (member != null) {
+                LoyaltyConfig.hitungPoinDidapat(totalInt)
+            } else 0
+
             val order = Order(
                 id = existingId ?: 0,
                 timestamp = System.currentTimeMillis(),
                 nomorMeja = nomorMeja, tipeOrder = tipeOrder,
-                namaPelanggan = namaPelanggan,
+                namaPelanggan = if (namaPelanggan.isBlank() && member != null)
+                    member.nama else namaPelanggan,
                 subtotal = sub,
                 diskonTipe = diskonTipe, diskonValue = diskonValue,
                 diskonAmount = diskon,
+                voucherKode = voucherKode, voucherAmount = voucherAmount,
                 pajakPersen = pajakPersen, pajakAmount = pajak,
                 total = totalInt,
                 metodeBayar = metode, dibayar = dibayar,
                 kembalian = (dibayar - totalInt).coerceAtLeast(0),
                 status = OrderStatus.PAID.id,
                 kasirId = u?.id ?: "", kasirNama = u?.nama ?: "",
-                shiftId = shiftId
+                shiftId = shiftId,
+                memberId = member?.id ?: 0,
+                memberNama = member?.nama ?: "",
+                poinDidapat = poinDidapat
             )
             val id: Long = if (existingId != null) {
                 repo.updateOrderWithItems(order, items); existingId
-            } else repo.simpanOrder(order, items)
-            resetOrder(); onDone(id)
+            } else {
+                repo.simpanOrder(order, items)
+            }
+
+            // ── Update member: tambah poin, kurangi poin dipakai, tambah hutang kalau metode HUTANG ──
+            if (member != null) {
+                try {
+                    // Redeem poin dulu (kalau ada)
+                    if (poinDipakai > 0) {
+                        crmRepo.redeemPoin(member.id, poinDipakai)
+                    }
+                    // Proses order (earn poin + hutang)
+                    crmRepo.processOrder(member.id, order.copy(id = id))
+                    // Tandai voucher terpakai
+                    if (voucherKode.isNotBlank()) {
+                        crmRepo.markVoucherUsed(voucherKode)
+                    }
+                } catch (_: Exception) {}
+            }
+
+            resetOrder()
+            onDone(id)
         }
     }
 }
@@ -201,7 +327,10 @@ class MenuViewModel(private val repo: PosRepository) : ViewModel() {
     fun save(item: MenuItem, onDone: () -> Unit = {}) = viewModelScope.launch {
         repo.upsertMenu(item); onDone()
     }
-    fun delete(item: MenuItem) = viewModelScope.launch { repo.deleteMenu(item) }
+    fun delete(item: MenuItem) = viewModelScope.launch {
+        MenuPhotoManager.deleteByPath(item.fotoUri)
+        repo.deleteMenu(item)
+    }
     fun toggle(item: MenuItem) = viewModelScope.launch {
         repo.setTersedia(item.id, !item.tersedia)
     }
@@ -245,10 +374,14 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 }
 
-class PosVMFactory(private val repo: PosRepository) : ViewModelProvider.Factory {
+class PosVMFactory(
+    private val repo: PosRepository,
+    private val crmRepo: CrmRepository
+) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = when {
-        modelClass.isAssignableFrom(KasirViewModel::class.java) -> KasirViewModel(repo) as T
+        modelClass.isAssignableFrom(KasirViewModel::class.java) ->
+            KasirViewModel(repo, crmRepo) as T
         modelClass.isAssignableFrom(MenuViewModel::class.java) -> MenuViewModel(repo) as T
         modelClass.isAssignableFrom(OpenBillViewModel::class.java) -> OpenBillViewModel(repo) as T
         modelClass.isAssignableFrom(RiwayatViewModel::class.java) -> RiwayatViewModel(repo) as T
@@ -266,7 +399,7 @@ private fun activityOwner(): ComponentActivity =
 
 @Composable
 fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     PosScreen(vm,
@@ -276,7 +409,7 @@ fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController)
 
 @Composable
 fun KeranjangRoute(app: IyonzApp, nav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     KeranjangScreen(vm,
@@ -286,7 +419,7 @@ fun KeranjangRoute(app: IyonzApp, nav: NavHostController) {
 
 @Composable
 fun BayarRoute(app: IyonzApp, nav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     val scope = rememberCoroutineScope()
@@ -316,7 +449,7 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
 
 @Composable
 fun OpenBillRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val vm: OpenBillViewModel = viewModel(factory = factory)
     val owner = activityOwner()
     val kasirVm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
@@ -328,7 +461,7 @@ fun OpenBillRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostContro
 
 @Composable
 fun MenuRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val vm: MenuViewModel = viewModel(factory = factory)
     MenuScreen(vm) { id ->
         nav.navigate(if (id == null) Routes.EDIT_MENU else "${Routes.EDIT_MENU}/$id")
@@ -337,21 +470,21 @@ fun MenuRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController
 
 @Composable
 fun EditMenuRoute(app: IyonzApp, nav: NavHostController, menuId: Long?) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val vm: MenuViewModel = viewModel(factory = factory)
     EditMenuScreen(vm, menuId) { nav.popBackStack() }
 }
 
 @Composable
 fun RiwayatRoute(app: IyonzApp) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val vm: RiwayatViewModel = viewModel(factory = factory)
     RiwayatScreen(vm)
 }
 
 @Composable
 fun DashboardRoute(app: IyonzApp) {
-    val factory = remember { PosVMFactory(app.posRepo) }
+    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
     val vm: DashboardViewModel = viewModel(factory = factory)
     DashboardScreen(vm)
 }
@@ -590,9 +723,12 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
     val cart by vm.cart.collectAsState()
     val subtotal by vm.subtotal.collectAsState()
     val diskonAmount = vm.hitungDiskon(subtotal)
-    val afterDiskon = subtotal - diskonAmount
-    val pajakAmount = vm.hitungPajak(afterDiskon)
-    val total = afterDiskon + pajakAmount
+    val afterDiskon = (subtotal - diskonAmount).coerceAtLeast(0)
+    val afterVoucher = (afterDiskon - vm.voucherAmount).coerceAtLeast(0)
+    val poinRupiah = vm.poinKeRupiah(vm.poinDipakai)
+    val afterPoin = (afterVoucher - poinRupiah).coerceAtLeast(0)
+    val pajakAmount = vm.hitungPajak(afterPoin)
+    val total = afterPoin + pajakAmount
 
     var noteFor by remember { mutableStateOf<CartLine?>(null) }
     var showDiskon by remember { mutableStateOf(false) }
@@ -618,7 +754,9 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                             append(" • ")
                         }
                         append(TipeOrder.fromId(vm.tipeOrder).label)
-                        if (vm.namaPelanggan.isNotBlank()) {
+                        if (vm.selectedMember != null) {
+                            append(" • ⭐ ${vm.selectedMember!!.nama}")
+                        } else if (vm.namaPelanggan.isNotBlank()) {
                             append(" • "); append(vm.namaPelanggan)
                         }
                     },
@@ -704,6 +842,22 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                             Text("Diskon", Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodySmall, color = DANGER)
                             Text("- ${diskonAmount.rupiah()}",
+                                style = MaterialTheme.typography.bodySmall, color = DANGER)
+                        }
+                    }
+                    if (vm.voucherAmount > 0) {
+                        Row {
+                            Text("Voucher ${vm.voucherKode}", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall, color = DANGER)
+                            Text("- ${vm.voucherAmount.rupiah()}",
+                                style = MaterialTheme.typography.bodySmall, color = DANGER)
+                        }
+                    }
+                    if (poinRupiah > 0) {
+                        Row {
+                            Text("Poin ${vm.poinDipakai}", Modifier.weight(1f),
+                                style = MaterialTheme.typography.bodySmall, color = DANGER)
+                            Text("- ${poinRupiah.rupiah()}",
                                 style = MaterialTheme.typography.bodySmall, color = DANGER)
                         }
                     }
@@ -983,18 +1137,35 @@ fun KeranjangScreen(vm: KasirViewModel, onBack: () -> Unit, onBayar: () -> Unit)
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: (Long) -> Unit) {
+fun BayarScreen(
+    vm: KasirViewModel,
+    onBack: () -> Unit,
+    onSelesai: (Long) -> Unit
+) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     val subtotal by vm.subtotal.collectAsState()
     val diskonAmount = vm.hitungDiskon(subtotal)
-    val afterDiskon = subtotal - diskonAmount
-    val pajakAmount = vm.hitungPajak(afterDiskon)
-    val total = afterDiskon + pajakAmount
+    val afterDiskon = (subtotal - diskonAmount).coerceAtLeast(0)
+    val afterVoucher = (afterDiskon - vm.voucherAmount).coerceAtLeast(0)
+    val poinRupiah = vm.poinKeRupiah(vm.poinDipakai)
+    val afterPoin = (afterVoucher - poinRupiah).coerceAtLeast(0)
+    val pajakAmount = vm.hitungPajak(afterPoin)
+    val total = afterPoin + pajakAmount
 
     var metode by remember { mutableStateOf(PaymentMethod.CASH.id) }
     var dibayarText by remember { mutableStateOf("") }
+    var voucherInput by remember { mutableStateOf("") }
+    var showMemberPicker by remember { mutableStateOf(false) }
+    var showPoinDialog by remember { mutableStateOf(false) }
+
     val dibayar = dibayarText.toIntOrNull() ?: 0
     val kembalian = (dibayar - total).coerceAtLeast(0)
     val cukup = if (metode == PaymentMethod.CASH.id) dibayar >= total else true
+
+    val crmEnabled = FeatureManager.isEnabled(FeatureKey.MEMBER) ||
+            FeatureManager.isEnabled(FeatureKey.HUTANG_PELANGGAN)
+    val voucherEnabled = FeatureManager.isEnabled(FeatureKey.VOUCHER)
 
     Scaffold(
         topBar = {
@@ -1004,62 +1175,176 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: (Long) -> Uni
                 })
         }
     ) { pad ->
-        Column(Modifier.padding(pad).padding(16.dp).fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                Column(Modifier.padding(16.dp)) {
-                    if (subtotal > 0) {
-                        Row {
-                            Text("Subtotal", Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodySmall)
-                            Text(subtotal.rupiah(),
-                                style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (diskonAmount > 0) {
-                            Row {
-                                Text("Diskon", Modifier.weight(1f),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = DANGER)
-                                Text("- ${diskonAmount.rupiah()}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = DANGER)
-                            }
-                        }
-                        if (pajakAmount > 0) {
-                            Row {
-                                Text("PPN ${vm.pajakPersen}%", Modifier.weight(1f),
+        Column(Modifier.padding(pad).padding(16.dp).fillMaxSize()
+            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+
+            // ── MEMBER PICKER ──
+            if (crmEnabled) {
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = if (vm.selectedMember != null) BRAND_LIGHT
+                    else MaterialTheme.colorScheme.surfaceVariant)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Person, null, tint = BRAND)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            if (vm.selectedMember == null) {
+                                Text("Tanpa Member",
+                                    fontWeight = FontWeight.SemiBold)
+                                Text("Tap untuk pilih member",
                                     style = MaterialTheme.typography.bodySmall)
-                                Text(pajakAmount.rupiah(),
+                            } else {
+                                val m = vm.selectedMember!!
+                                Text(m.nama, fontWeight = FontWeight.SemiBold)
+                                Text("⭐ ${m.poin} poin • ${MemberTier.fromId(m.tier).label}",
                                     style = MaterialTheme.typography.bodySmall)
+                                if (m.hutang > 0) {
+                                    Text("💳 Hutang: ${m.hutang.rupiah()}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = DANGER)
+                                }
                             }
                         }
-                        Spacer(Modifier.height(6.dp))
-                    }
-                    Text("Total tagihan", style = MaterialTheme.typography.bodyMedium)
-                    Text(total.rupiah(), style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold, color = BRAND)
-                    if (vm.nomorMeja.isNotBlank() || vm.namaPelanggan.isNotBlank()) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(buildString {
-                            if (vm.nomorMeja.isNotBlank()) append("Meja ${vm.nomorMeja}")
-                            if (vm.namaPelanggan.isNotBlank()) {
-                                if (isNotEmpty()) append(" • ")
-                                append(vm.namaPelanggan)
+                        if (vm.selectedMember != null) {
+                            IconButton(onClick = { vm.setMember(null) }) {
+                                Icon(Icons.Default.Close, null)
                             }
-                        }, style = MaterialTheme.typography.bodySmall)
+                        }
+                        TextButton(onClick = { showMemberPicker = true }) {
+                            Text(if (vm.selectedMember == null) "Pilih" else "Ganti")
+                        }
                     }
                 }
             }
 
+            // ── VOUCHER ──
+            if (voucherEnabled) {
+                Card {
+                    Column(Modifier.padding(12.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.LocalOffer, null, tint = BRAND,
+                                modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Voucher", fontWeight = FontWeight.SemiBold)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = if (vm.voucherKode.isNotBlank()) vm.voucherKode
+                                else voucherInput,
+                                onValueChange = {
+                                    voucherInput = it.uppercase().filter { c ->
+                                        c.isLetterOrDigit()
+                                    }.take(20)
+                                },
+                                placeholder = { Text("Kode voucher") },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.bodyMedium,
+                                isError = vm.voucherError != null,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            if (vm.voucherKode.isBlank()) {
+                                Button(
+                                    onClick = {
+                                        vm.applyVoucher(voucherInput, subtotal)
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = BRAND),
+                                    enabled = voucherInput.isNotBlank()
+                                ) { Text("Pakai") }
+                            } else {
+                                OutlinedButton(onClick = {
+                                    vm.clearVoucher(); voucherInput = ""
+                                }) { Text("Batal") }
+                            }
+                        }
+                        vm.voucherError?.let {
+                            Spacer(Modifier.height(4.dp))
+                            Text(it, color = DANGER,
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (vm.voucherAmount > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("Diskon voucher: - ${vm.voucherAmount.rupiah()}",
+                                color = DANGER,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+
+            // ── POIN REDEEM ──
+            if (vm.selectedMember != null && vm.selectedMember!!.poin > 0) {
+                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                    Row(Modifier.fillMaxWidth().padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Star, null, tint = BRAND)
+                        Spacer(Modifier.width(8.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Tukar Poin",
+                                fontWeight = FontWeight.SemiBold)
+                            Text(
+                                if (vm.poinDipakai > 0)
+                                    "${vm.poinDipakai} poin = ${poinRupiah.rupiah()}"
+                                else "Kamu punya ${vm.selectedMember!!.poin} poin",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        TextButton(onClick = { showPoinDialog = true }) {
+                            Text(if (vm.poinDipakai > 0) "Ubah" else "Pakai")
+                        }
+                    }
+                }
+            }
+
+            // ── RINGKASAN ──
+            Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                Column(Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    if (subtotal > 0) {
+                        RingkasRow("Subtotal", subtotal.rupiah())
+                    }
+                    if (diskonAmount > 0)
+                        RingkasRow("Diskon", "- ${diskonAmount.rupiah()}", DANGER)
+                    if (vm.voucherAmount > 0)
+                        RingkasRow("Voucher", "- ${vm.voucherAmount.rupiah()}", DANGER)
+                    if (poinRupiah > 0)
+                        RingkasRow("Poin", "- ${poinRupiah.rupiah()}", DANGER)
+                    if (pajakAmount > 0)
+                        RingkasRow("PPN ${vm.pajakPersen}%", pajakAmount.rupiah())
+                    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+                    Row {
+                        Text("Total tagihan", Modifier.weight(1f),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold)
+                        Text(total.rupiah(),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold, color = BRAND)
+                    }
+                }
+            }
+
+            // ── METODE BAYAR ──
             Text("Metode bayar", fontWeight = FontWeight.SemiBold)
             LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(PaymentMethod.values().toList()) { m ->
-                    FilterChip(selected = metode == m.id, onClick = { metode = m.id },
+                val methods = if (vm.selectedMember != null && crmEnabled)
+                    PaymentMethod.values().toList()
+                else PaymentMethod.values().filter { it != PaymentMethod.HUTANG }
+                items(methods) { m ->
+                    FilterChip(selected = metode == m.id,
+                        onClick = { metode = m.id },
                         label = { Text(m.label,
                             style = MaterialTheme.typography.bodySmall) })
                 }
             }
+            if (metode == PaymentMethod.HUTANG.id && vm.selectedMember == null) {
+                Text("Pilih member dulu untuk metode hutang",
+                    color = DANGER, style = MaterialTheme.typography.bodySmall)
+            }
 
+            // ── CASH ──
             if (metode == PaymentMethod.CASH.id) {
                 OutlinedTextField(dibayarText,
                     { dibayarText = it.filter { c -> c.isDigit() } },
@@ -1074,18 +1359,63 @@ fun BayarScreen(vm: KasirViewModel, onBack: () -> Unit, onSelesai: (Long) -> Uni
                 }
             }
 
-            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.height(8.dp))
             Button(
                 onClick = {
                     vm.checkout(metode,
                         if (metode == PaymentMethod.CASH.id) dibayar else total
                     ) { id -> onSelesai(id) }
                 },
-                enabled = cukup,
+                enabled = cukup && !(metode == PaymentMethod.HUTANG.id
+                        && vm.selectedMember == null),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = BRAND)
             ) { Text("Konfirmasi Bayar", fontWeight = FontWeight.Bold) }
         }
+    }
+
+    // ── MEMBER PICKER DIALOG ──
+    if (showMemberPicker) {
+        MemberPickerDialog(
+            crmRepo = (ctx.applicationContext as IyonzApp).crmRepo,
+            onDismiss = { showMemberPicker = false },
+            onPick = { m ->
+                vm.setMember(m)
+                showMemberPicker = false
+            }
+        )
+    }
+
+    // ── POIN DIALOG ──
+    if (showPoinDialog && vm.selectedMember != null) {
+        PoinPakaiDialog(
+            member = vm.selectedMember!!,
+            currentPoin = vm.poinDipakai,
+            maxPoin = minOf(
+                vm.selectedMember!!.poin,
+                LoyaltyConfig.rupiahKePoin(afterVoucher)
+            ),
+            onDismiss = { showPoinDialog = false },
+            onConfirm = { p ->
+                vm.poinDipakai = p
+                showPoinDialog = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun RingkasRow(label: String, value: String,
+                        color: Color = Color.Unspecified) {
+    Row {
+        Text(label, Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface
+            else color)
+        Text(value, style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface
+            else color)
     }
 }
 
@@ -1100,6 +1430,221 @@ private fun QuickCash(total: Int, onPick: (Int) -> Unit) {
             AssistChip(onClick = { onPick(s) }, label = { Text(s.rupiah()) })
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════
+// MEMBER PICKER DIALOG
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun MemberPickerDialog(
+    crmRepo: CrmRepository,
+    onDismiss: () -> Unit,
+    onPick: (Member) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var search by remember { mutableStateOf("") }
+    var results by remember { mutableStateOf<List<Member>>(emptyList()) }
+    var showAddMember by remember { mutableStateOf(false) }
+
+    LaunchedEffect(search) {
+        results = if (search.isBlank()) {
+            crmRepo.activeMembers.first()
+        } else {
+            crmRepo.searchMember(search)
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Pilih Member") },
+        text = {
+            Column(Modifier.heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = search, onValueChange = { search = it },
+                    placeholder = { Text("Cari nama / telepon...",
+                        style = MaterialTheme.typography.bodySmall) },
+                    leadingIcon = { Icon(Icons.Default.Search, null,
+                        Modifier.size(18.dp)) },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.fillMaxWidth().height(52.dp)
+                )
+                OutlinedButton(
+                    onClick = { showAddMember = true },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.PersonAdd, null, Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Member Baru")
+                }
+                if (results.isEmpty()) {
+                    Box(Modifier.fillMaxWidth().padding(24.dp),
+                        contentAlignment = Alignment.Center) {
+                        Text(if (search.isBlank()) "Belum ada member"
+                            else "Nggak ada yang cocok",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        items(results, key = { it.id }) { m ->
+                            Card(
+                                Modifier.fillMaxWidth()
+                                    .clickable { onPick(m) }
+                            ) {
+                                Row(Modifier.padding(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    Box(Modifier.size(36.dp).clip(CircleShape)
+                                        .background(BRAND_LIGHT),
+                                        contentAlignment = Alignment.Center) {
+                                        Text(m.nama.take(1).uppercase(),
+                                            color = BRAND,
+                                            fontWeight = FontWeight.Bold)
+                                    }
+                                    Spacer(Modifier.width(10.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(m.nama, fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            buildString {
+                                                if (m.telepon.isNotBlank())
+                                                    append("${m.telepon} • ")
+                                                append("⭐ ${m.poin}")
+                                            },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Tutup") }
+        }
+    )
+
+    if (showAddMember) {
+        MemberQuickAddDialog(
+            onDismiss = { showAddMember = false },
+            onSave = { newMember ->
+                scope.launch {
+                    crmRepo.saveMember(newMember)
+                    showAddMember = false
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun MemberQuickAddDialog(
+    onDismiss: () -> Unit,
+    onSave: (Member) -> Unit
+) {
+    var nama by remember { mutableStateOf("") }
+    var telepon by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Member Baru") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(nama, { nama = it },
+                    label = { Text("Nama *") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(telepon,
+                    { telepon = it.filter { c -> c.isDigit() || c == '+' || c == '-' } },
+                    label = { Text("Telepon / WhatsApp") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                err?.let { Text(it, color = DANGER,
+                    style = MaterialTheme.typography.bodySmall) }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (nama.isBlank()) { err = "Nama wajib"; return@TextButton }
+                onSave(Member(nama = nama.trim(), telepon = telepon.trim()))
+            }) { Text("Simpan") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
+}
+
+// ═══════════════════════════════════════════════════════════
+// POIN PAKAI DIALOG
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun PoinPakaiDialog(
+    member: Member,
+    currentPoin: Int,
+    maxPoin: Int,
+    onDismiss: () -> Unit,
+    onConfirm: (Int) -> Unit
+) {
+    var poinText by remember {
+        mutableStateOf(if (currentPoin > 0) currentPoin.toString() else "")
+    }
+    val poin = poinText.toIntOrNull() ?: 0
+    val rupiah = LoyaltyConfig.poinKeRupiah(poin)
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Tukar Poin") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Poin tersedia: ${member.poin}",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("Maks dipakai order ini: $maxPoin",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("1 poin = ${LoyaltyConfig.RUPIAH_PER_POIN.rupiah()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                OutlinedTextField(poinText,
+                    { poinText = it.filter { c -> c.isDigit() }.take(6) },
+                    label = { Text("Jumlah poin") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0, 10, 50, maxPoin).distinct()
+                        .filter { it in 0..maxPoin }.take(4).forEach { p ->
+                        AssistChip(
+                            onClick = { poinText = if (p == 0) "" else p.toString() },
+                            label = { Text(if (p == 0) "Nol" else "$p",
+                                style = MaterialTheme.typography.bodySmall) }
+                        )
+                    }
+                }
+                if (poin > 0) {
+                    Card(colors = CardDefaults.cardColors(
+                        containerColor = BRAND_LIGHT)) {
+                        Column(Modifier.padding(10.dp)) {
+                            Text("Diskon poin: ${rupiah.rupiah()}",
+                                fontWeight = FontWeight.Bold, color = BRAND)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(poin.coerceIn(0, maxPoin)) },
+                enabled = poin <= maxPoin
+            ) { Text("Pakai") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Batal") }
+        }
+    )
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1135,7 +1680,9 @@ fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
                                     style = MaterialTheme.typography.titleMedium)
                                 Text(buildString {
                                     append(TipeOrder.fromId(o.tipeOrder).label)
-                                    if (o.namaPelanggan.isNotBlank()) {
+                                    if (o.memberNama.isNotBlank()) {
+                                        append(" • ⭐ ${o.memberNama}")
+                                    } else if (o.namaPelanggan.isNotBlank()) {
                                         append(" • "); append(o.namaPelanggan)
                                     }
                                 }, style = MaterialTheme.typography.bodySmall)
@@ -1243,11 +1790,13 @@ private fun MenuRow(
 @Composable
 fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var nama by remember { mutableStateOf("") }
     var hargaText by remember { mutableStateOf("") }
     var hargaBeliText by remember { mutableStateOf("") }
     var kategori by remember { mutableStateOf("Umum") }
     var fotoUri by remember { mutableStateOf<String?>(null) }
+    var originalPhotoUri by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
     var loaded by remember { mutableStateOf(menuId == null) }
 
@@ -1257,6 +1806,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 nama = it.nama; hargaText = it.harga.toString()
                 hargaBeliText = if (it.hargaBeli > 0) it.hargaBeli.toString() else ""
                 kategori = it.kategori; fotoUri = it.fotoUri; tersedia = it.tersedia
+                originalPhotoUri = it.fotoUri
             }
             loaded = true
         }
@@ -1266,12 +1816,15 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) {
-            try {
-                ctx.contentResolver.takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            scope.launch {
+                if (MenuPhotoManager.isInternalPath(fotoUri)) {
+                    MenuPhotoManager.deleteByPath(fotoUri)
+                }
+                val internal = MenuPhotoManager.copyToInternal(
+                    ctx, uri, menuId ?: 0L
                 )
-            } catch (_: Exception) {}
-            fotoUri = uri.toString()
+                fotoUri = internal ?: uri.toString()
+            }
         }
     }
 
@@ -1330,6 +1883,11 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                         val harga = hargaText.toIntOrNull() ?: 0
                         if (nama.isBlank() || harga <= 0) return@Button
                         val hargaBeli = hargaBeliText.toIntOrNull() ?: 0
+                        if (menuId != null && originalPhotoUri != null
+                            && originalPhotoUri != fotoUri
+                            && MenuPhotoManager.isInternalPath(originalPhotoUri)) {
+                            MenuPhotoManager.deleteByPath(originalPhotoUri)
+                        }
                         vm.save(MenuItem(
                             id = menuId ?: 0,
                             nama = nama.trim(), harga = harga,
@@ -1423,7 +1981,9 @@ private fun RiwayatCard(o: Order, onClick: () -> Unit) {
                     }
                     Text(buildString {
                         append(o.timestamp.tanggal())
-                        if (o.kasirNama.isNotBlank()) {
+                        if (o.memberNama.isNotBlank()) {
+                            append(" • ⭐ "); append(o.memberNama)
+                        } else if (o.kasirNama.isNotBlank()) {
                             append(" • "); append(o.kasirNama)
                         }
                     }, style = MaterialTheme.typography.bodySmall,
@@ -1433,14 +1993,14 @@ private fun RiwayatCard(o: Order, onClick: () -> Unit) {
                     Text(o.total.rupiah(), fontWeight = FontWeight.Bold,
                         color = if (o.status == OrderStatus.PAID.id) BRAND
                         else MaterialTheme.colorScheme.onSurfaceVariant)
-                    if (o.diskonAmount > 0 || o.pajakAmount > 0) {
-                        Text(buildString {
-                            if (o.diskonAmount > 0) append("Disc ${o.diskonAmount.rupiah()}")
-                            if (o.pajakAmount > 0) {
-                                if (isNotEmpty()) append(" • ")
-                                append("PPN ${o.pajakAmount.rupiah()}")
-                            }
-                        }, style = MaterialTheme.typography.labelSmall,
+                    val extras = buildString {
+                        if (o.diskonAmount > 0) append("Disc ${o.diskonAmount.rupiah()} ")
+                        if (o.voucherAmount > 0) append("Vcr ${o.voucherAmount.rupiah()} ")
+                        if (o.pajakAmount > 0) append("PPN ${o.pajakAmount.rupiah()}")
+                    }.trim()
+                    if (extras.isNotBlank()) {
+                        Text(extras,
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -1483,7 +2043,7 @@ private fun OrderDetailDialog(
             }
         },
         text = {
-            Column(Modifier.heightIn(max = 400.dp),
+            Column(Modifier.heightIn(max = 450.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 items.forEach { it ->
                     Row {
@@ -1519,6 +2079,14 @@ private fun OrderDetailDialog(
                             style = MaterialTheme.typography.bodySmall, color = DANGER)
                     }
                 }
+                if (order.voucherAmount > 0) {
+                    Row {
+                        Text("Voucher ${order.voucherKode}", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall, color = DANGER)
+                        Text("- ${order.voucherAmount.rupiah()}",
+                            style = MaterialTheme.typography.bodySmall, color = DANGER)
+                    }
+                }
                 if (order.pajakAmount > 0) {
                     Row {
                         Text("PPN ${order.pajakPersen}%", Modifier.weight(1f),
@@ -1537,6 +2105,14 @@ private fun OrderDetailDialog(
                         style = MaterialTheme.typography.bodySmall)
                     Text(PaymentMethod.fromId(order.metodeBayar).label,
                         style = MaterialTheme.typography.bodySmall)
+                }
+                if (order.memberNama.isNotBlank()) {
+                    Row {
+                        Text("Member", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("⭐ ${order.memberNama} (+${order.poinDidapat} poin)",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
                 }
                 if (order.kasirNama.isNotBlank()) {
                     Row {
@@ -1705,7 +2281,10 @@ fun DashboardScreen(vm: DashboardViewModel) {
                                         fontWeight = FontWeight.SemiBold
                                     )
                                     Text(
-                                        if (order.nomorMeja.isNotBlank()) "Meja ${order.nomorMeja}"
+                                        if (order.memberNama.isNotBlank())
+                                            "⭐ ${order.memberNama}"
+                                        else if (order.nomorMeja.isNotBlank())
+                                            "Meja ${order.nomorMeja}"
                                         else "Tanpa meja",
                                         style = MaterialTheme.typography.bodySmall
                                     )
