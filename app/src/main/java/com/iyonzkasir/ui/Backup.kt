@@ -26,6 +26,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import com.iyonzkasir.*
+import com.iyonzkasir.data.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -67,7 +68,7 @@ object BackupService {
         return SecretKeySpec(key, "AES")
     }
 
-    /** Backup database + foto + setting ke file .iyonz di OutputStream. */
+    /** Backup database + foto + setting ke file .iyonz. */
     suspend fun backup(
         context: Context,
         password: String,
@@ -235,9 +236,8 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
     var msg by remember { mutableStateOf<String?>(null) }
     var lastTs by remember { mutableStateOf(0L) }
     var lastName by remember { mutableStateOf("") }
-    var pendingMode by remember { mutableStateOf("") } // "backup" | "restore"
+    var pendingMode by remember { mutableStateOf("") }
 
-    // Dialog password
     var showPwdDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -245,18 +245,15 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
         lastName = app.settingRepo.getLastBackupName()
     }
 
-    // File picker untuk simpan backup
     val saveLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
-        // Simpan uri di variabel sementara via pendingMode
         pendingUri = uri
         pendingMode = "backup"
         showPwdDialog = true
     }
 
-    // File picker untuk restore
     val openLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
@@ -282,7 +279,6 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
             Modifier.padding(pad).fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Info status backup terakhir
             Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                 Column(Modifier.padding(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -308,7 +304,6 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Penjelasan
             Card(colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                 Column(Modifier.padding(16.dp),
@@ -327,7 +322,6 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
 
             Spacer(Modifier.height(4.dp))
 
-            // Tombol Backup
             Button(
                 onClick = {
                     val fname = BackupService.namaFileDefault()
@@ -342,7 +336,6 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
                 Text("Backup Sekarang", fontWeight = FontWeight.Bold)
             }
 
-            // Tombol Restore
             OutlinedButton(
                 onClick = { openLauncher.launch(arrayOf("*/*")) },
                 enabled = !busy,
@@ -353,7 +346,6 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
                 Text("Restore dari File", fontWeight = FontWeight.Bold)
             }
 
-            // Info kalau ada proses
             if (busy) {
                 Spacer(Modifier.height(8.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -374,7 +366,6 @@ fun BackupRoute(app: IyonzApp, nav: NavHostController) {
         }
     }
 
-    // Dialog password
     if (showPwdDialog) {
         PasswordDialog(
             title = if (pendingMode == "backup") "Password Backup"
