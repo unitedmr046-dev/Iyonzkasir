@@ -43,6 +43,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     var namaToko by remember { mutableStateOf("") }
     var businessType by remember { mutableStateOf(BusinessType.WARUNG) }
     var memberCount by remember { mutableIntStateOf(0) }
+    var lowStockCount by remember { mutableIntStateOf(0) }
     val enabled by FeatureManager.enabled.collectAsState()
 
     LaunchedEffect(Unit) {
@@ -52,9 +53,16 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     LaunchedEffect(Unit) {
         app.crmRepo.memberCount.collect { memberCount = it }
     }
+    LaunchedEffect(Unit) {
+        app.stockRepo.lowStockCount.collect { lowStockCount = it }
+    }
 
     val crmEnabled = FeatureKey.MEMBER in enabled || FeatureKey.VOUCHER in enabled
             || FeatureKey.HUTANG_PELANGGAN in enabled
+    val stockEnabled = FeatureKey.LOW_STOCK_ALERT in enabled
+            || FeatureKey.POTONG_STOK in enabled
+            || FeatureKey.STOCK_OPNAME in enabled
+    val kategoriEnabled = FeatureKey.KATEGORI_MGMT in enabled
 
     Scaffold(
         topBar = {
@@ -150,6 +158,34 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
+            // Kategori
+            if (kategoriEnabled && Session.can(PermissionKey.KELOLA_KATEGORI)) {
+                item {
+                    SectionHeader("Menu")
+                    SettingsItem("Kelola Kategori", Icons.Default.Category,
+                        subtitle = "Tambah/edit kategori & warna") {
+                        nav.navigate(Routes.KATEGORI)
+                    }
+                }
+            }
+
+            // Inventaris / Stok
+            if (stockEnabled && Session.can(PermissionKey.LIHAT_STOK)) {
+                item {
+                    if (kategoriEnabled && Session.can(PermissionKey.KELOLA_KATEGORI)) {
+                        // sudah ada header "Menu"
+                    } else {
+                        SectionHeader("Inventaris")
+                    }
+                    SettingsItem("Kelola Stok", Icons.Default.Inventory,
+                        subtitle = if (lowStockCount > 0)
+                            "⚠️ $lowStockCount menu stok menipis"
+                        else "Stok, opname, riwayat pergerakan") {
+                        nav.navigate(Routes.INVENTARIS)
+                    }
+                }
+            }
+
             // Laporan
             if (FeatureManager.isEnabled(FeatureKey.LABA_PER_PRODUK)
                 && Session.can(PermissionKey.LIHAT_LAPORAN)) {
@@ -205,17 +241,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Shift
-            if (FeatureManager.isEnabled(FeatureKey.SHIFT_KASIR)) {
-                item {
-                    SectionHeader("Shift Kasir")
-                    SettingsItem("Kelola Shift", Icons.Default.Schedule,
-                        subtitle = "Buka/tutup shift & laporan kasir") {
-                        nav.navigate(Routes.TAB_SHIFT)
-                    }
-                }
-            }
-
             // Hardware
             if (FeatureManager.isEnabled(FeatureKey.PRINTER_BT)) {
                 item {
@@ -242,7 +267,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 SectionHeader("Tentang")
                 SettingsItem("Tentang Aplikasi", Icons.Default.Info,
-                    subtitle = "iyonzkasir v0.5.0") {
+                    subtitle = "iyonzkasir v0.6.0") {
                     nav.navigate(Routes.TENTANG)
                 }
             }
@@ -250,7 +275,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.5.0 • Made with ❤️",
+                    Text("iyonzkasir v0.6.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -579,51 +604,63 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
                 CircularProgressIndicator()
             }
         } else {
-            Column(
-                Modifier.padding(pad).fillMaxSize().padding(16.dp),
+            LazyColumn(
+                Modifier.padding(pad).fillMaxSize(),
+                contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Box(
-                        Modifier.size(100.dp).clip(CircleShape).background(BRAND_LIGHT)
-                            .clickable { picker.launch(arrayOf("image/*")) },
-                        contentAlignment = Alignment.Center
+                item {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        if (logoUri != null) {
-                            AsyncImage(model = logoUri, contentDescription = null,
-                                contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize())
-                        } else {
-                            Icon(Icons.Default.AddPhotoAlternate, null,
-                                tint = BRAND, modifier = Modifier.size(40.dp))
+                        Box(
+                            Modifier.size(100.dp).clip(CircleShape).background(BRAND_LIGHT)
+                                .clickable { picker.launch(arrayOf("image/*")) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (logoUri != null) {
+                                AsyncImage(model = logoUri, contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize())
+                            } else {
+                                Icon(Icons.Default.AddPhotoAlternate, null,
+                                    tint = BRAND, modifier = Modifier.size(40.dp))
+                            }
                         }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Tap logo untuk ganti",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-                Text("Tap logo untuk ganti",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally))
-
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(nama, { nama = it },
-                    label = { Text("Nama toko *") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(alamat, { alamat = it },
-                    label = { Text("Alamat") },
-                    modifier = Modifier.fillMaxWidth(), maxLines = 2)
-                OutlinedTextField(telepon,
-                    { telepon = it.filter { c -> c.isDigit() || c == '+' } },
-                    label = { Text("No. WhatsApp / Telp") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                    modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(footer, { footer = it },
-                    label = { Text("Footer struk") },
-                    modifier = Modifier.fillMaxWidth(), maxLines = 2)
-
-                Text("Jenis Usaha", fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 8.dp))
-
-                BusinessType.values().forEach { bt ->
+                item {
+                    OutlinedTextField(nama, { nama = it },
+                        label = { Text("Nama toko *") },
+                        modifier = Modifier.fillMaxWidth(), singleLine = true)
+                }
+                item {
+                    OutlinedTextField(alamat, { alamat = it },
+                        label = { Text("Alamat") },
+                        modifier = Modifier.fillMaxWidth(), maxLines = 2)
+                }
+                item {
+                    OutlinedTextField(telepon,
+                        { telepon = it.filter { c -> c.isDigit() || c == '+' } },
+                        label = { Text("No. WhatsApp / Telp") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth(), singleLine = true)
+                }
+                item {
+                    OutlinedTextField(footer, { footer = it },
+                        label = { Text("Footer struk") },
+                        modifier = Modifier.fillMaxWidth(), maxLines = 2)
+                }
+                item {
+                    Text("Jenis Usaha", fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 8.dp))
+                }
+                items(BusinessType.values().toList()) { bt ->
                     val selected = businessType == bt
                     Card(
                         Modifier.fillMaxWidth().clickable { businessType = bt },
@@ -645,8 +682,7 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
                         }
                     }
                 }
-
-                Spacer(Modifier.height(24.dp))
+                item { Spacer(Modifier.height(24.dp)) }
             }
         }
     }
@@ -685,7 +721,7 @@ fun TentangRoute(nav: NavHostController) {
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.5.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.6.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Text(
