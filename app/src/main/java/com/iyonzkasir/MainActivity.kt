@@ -24,13 +24,18 @@ import com.iyonzkasir.ui.*
 // ═══════════════════════════════════════════════════════════
 class IyonzApp : Application() {
     val database: AppDatabase by lazy { AppDatabase.get(this) }
+
     val userRepo: UserRepository by lazy {
         UserRepository(database.userDao(), database.permissionDao(), database.auditDao())
     }
     val settingRepo: SettingRepository by lazy { SettingRepository(database.settingDao()) }
     val featureRepo: FeatureRepository by lazy { FeatureRepository(database.featureDao()) }
+    val kategoriRepo: KategoriRepository by lazy { KategoriRepository(database.kategoriDao()) }
     val posRepo: PosRepository by lazy {
         PosRepository(database.menuDao(), database.orderDao(), database.shiftDao())
+    }
+    val stockRepo: StockRepository by lazy {
+        StockRepository(database.menuDao(), database.stockDao(), userRepo)
     }
     val shiftRepo: ShiftRepository by lazy {
         ShiftRepository(database.shiftDao(), database.orderDao())
@@ -82,9 +87,10 @@ object Routes {
     const val TAB_RIWAYAT = "tab_riwayat"
     const val TAB_DASHBOARD = "tab_dashboard"
     const val TAB_SHIFT = "tab_shift"
+    const val TAB_INVENTARIS = "tab_inventaris"
     const val TAB_SETTINGS = "tab_settings"
 
-    // Fullscreen routes
+    // Fullscreen
     const val KERANJANG = "keranjang"
     const val BAYAR = "bayar"
     const val EDIT_MENU = "edit_menu"
@@ -96,6 +102,8 @@ object Routes {
     const val LAPORAN = "laporan"
     const val BACKUP = "backup"
     const val CRM = "crm"
+    const val INVENTARIS = "inventaris"
+    const val KATEGORI = "kategori"
     const val TENTANG = "tentang"
 }
 
@@ -167,6 +175,8 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.LAPORAN) { LaporanRoute(app, nav) }
         composable(Routes.BACKUP) { BackupRoute(app, nav) }
         composable(Routes.CRM) { CrmRoute(app, nav) }
+        composable(Routes.INVENTARIS) { InventarisRoute(app, nav) }
+        composable(Routes.KATEGORI) { KategoriRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
@@ -192,6 +202,8 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
             feature = FeatureKey.OPEN_BILL, permission = PermissionKey.OPEN_BILL),
         NavTab(Routes.TAB_MENU, "Menu", Icons.Default.Restaurant,
             permission = PermissionKey.KELOLA_MENU),
+        NavTab(Routes.TAB_INVENTARIS, "Stok", Icons.Default.Inventory,
+            feature = FeatureKey.LOW_STOCK_ALERT, permission = PermissionKey.LIHAT_STOK),
         NavTab(Routes.TAB_RIWAYAT, "Riwayat", Icons.Default.History,
             permission = PermissionKey.LIHAT_RIWAYAT),
         NavTab(Routes.TAB_DASHBOARD, "Dashboard", Icons.Default.Dashboard,
@@ -241,6 +253,7 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
             composable(Routes.TAB_POS) { PosRoute(app, nav, innerNav) }
             composable(Routes.TAB_OPEN_BILL) { OpenBillRoute(app, nav, innerNav) }
             composable(Routes.TAB_MENU) { MenuRoute(app, nav, innerNav) }
+            composable(Routes.TAB_INVENTARIS) { InventarisRoute(app, nav) }
             composable(Routes.TAB_RIWAYAT) { RiwayatRoute(app) }
             composable(Routes.TAB_DASHBOARD) { DashboardRoute(app) }
             composable(Routes.TAB_SHIFT) { ShiftRoute(app) }
