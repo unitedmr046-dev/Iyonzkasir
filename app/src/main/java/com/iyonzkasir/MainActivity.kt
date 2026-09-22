@@ -80,15 +80,18 @@ object Routes {
     const val LOGIN = "login"
     const val MAIN = "main"
 
-    // Tabs
+    // Bottom Nav Tabs (5)
+    const val TAB_HOME = "tab_home"
     const val TAB_POS = "tab_pos"
-    const val TAB_OPEN_BILL = "tab_openbill"
-    const val TAB_MENU = "tab_menu"
     const val TAB_INVENTARIS = "tab_inventaris"
-    const val TAB_RIWAYAT = "tab_riwayat"
     const val TAB_DASHBOARD = "tab_dashboard"
-    const val TAB_SHIFT = "tab_shift"
     const val TAB_SETTINGS = "tab_settings"
+
+    // Akses via Home shortcut / Settings
+    const val TAB_MENU = "tab_menu"
+    const val TAB_OPEN_BILL = "tab_openbill"
+    const val TAB_RIWAYAT = "tab_riwayat"
+    const val TAB_SHIFT = "tab_shift"
 
     // Fullscreen
     const val KERANJANG = "keranjang"
@@ -104,7 +107,6 @@ object Routes {
     const val CRM = "crm"
     const val INVENTARIS = "inventaris"
     const val KATEGORI = "kategori"
-    const val BARCODE_SCAN = "barcode_scan"
     const val TENTANG = "tentang"
 }
 
@@ -183,7 +185,7 @@ fun AppRoot(app: IyonzApp) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// MAIN SHELL (Bottom Navigation)
+// MAIN SHELL (Bottom Navigation - 5 Tab)
 // ═══════════════════════════════════════════════════════════
 private data class NavTab(
     val route: String, val label: String, val icon: ImageVector,
@@ -196,21 +198,15 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
     val innerNav = rememberNavController()
     val enabledFeatures by FeatureManager.enabled.collectAsState()
 
+    // 5 Tab Utama
     val allTabs = listOf(
+        NavTab(Routes.TAB_HOME, "Home", Icons.Default.Home),
         NavTab(Routes.TAB_POS, "Kasir", Icons.Default.PointOfSale,
             permission = PermissionKey.JUAL),
-        NavTab(Routes.TAB_OPEN_BILL, "Open Bill", Icons.Default.ReceiptLong,
-            feature = FeatureKey.OPEN_BILL, permission = PermissionKey.OPEN_BILL),
-        NavTab(Routes.TAB_MENU, "Menu", Icons.Default.Restaurant,
-            permission = PermissionKey.KELOLA_MENU),
         NavTab(Routes.TAB_INVENTARIS, "Stok", Icons.Default.Inventory,
             feature = FeatureKey.LOW_STOCK_ALERT, permission = PermissionKey.LIHAT_STOK),
-        NavTab(Routes.TAB_RIWAYAT, "Riwayat", Icons.Default.History,
-            permission = PermissionKey.LIHAT_RIWAYAT),
-        NavTab(Routes.TAB_DASHBOARD, "Dashboard", Icons.Default.Dashboard,
+        NavTab(Routes.TAB_DASHBOARD, "Laporan", Icons.Default.BarChart,
             feature = FeatureKey.LAPORAN_HARIAN, permission = PermissionKey.LIHAT_DASHBOARD),
-        NavTab(Routes.TAB_SHIFT, "Shift", Icons.Default.Schedule,
-            feature = FeatureKey.SHIFT_KASIR, permission = PermissionKey.JUAL),
         NavTab(Routes.TAB_SETTINGS, "Setelan", Icons.Default.Settings)
     )
 
@@ -249,16 +245,20 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
             }
         }
     ) { pad ->
-        NavHost(innerNav, startDestination = Routes.TAB_POS,
+        NavHost(innerNav, startDestination = Routes.TAB_HOME,
             modifier = Modifier.padding(pad)) {
+            // 5 Tab Utama
+            composable(Routes.TAB_HOME) { HomeRoute(app, nav, innerNav) }
             composable(Routes.TAB_POS) { PosRoute(app, nav, innerNav) }
-            composable(Routes.TAB_OPEN_BILL) { OpenBillRoute(app, nav, innerNav) }
-            composable(Routes.TAB_MENU) { MenuRoute(app, nav, innerNav) }
             composable(Routes.TAB_INVENTARIS) { InventarisRoute(app, nav) }
-            composable(Routes.TAB_RIWAYAT) { RiwayatRoute(app) }
             composable(Routes.TAB_DASHBOARD) { DashboardRoute(app) }
-            composable(Routes.TAB_SHIFT) { ShiftRoute(app) }
             composable(Routes.TAB_SETTINGS) { SettingsRoute(app, nav) }
+
+            // Akses via Home shortcut (tetap ada di inner nav)
+            composable(Routes.TAB_MENU) { MenuRoute(app, nav, innerNav) }
+            composable(Routes.TAB_OPEN_BILL) { OpenBillRoute(app, nav, innerNav) }
+            composable(Routes.TAB_RIWAYAT) { RiwayatRoute(app) }
+            composable(Routes.TAB_SHIFT) { ShiftRoute(app) }
         }
     }
 }
