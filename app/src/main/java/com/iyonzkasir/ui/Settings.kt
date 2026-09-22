@@ -79,9 +79,8 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     val kategoriEnabled = FeatureKey.KATEGORI_MGMT in enabled
     val barcodeEnabled = FeatureKey.BARCODE in enabled
 
-    // Build groups
     val groups = buildList {
-        // ═══ TOKO ═══
+        // TOKO
         val tokoItems = mutableListOf<SettingItem>()
         tokoItems.add(SettingItem(
             "profil", "Profil Toko",
@@ -104,7 +103,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         if (tokoItems.isNotEmpty()) add("TOKO" to tokoItems)
 
-        // ═══ TRANSAKSI ═══
+        // TRANSAKSI
         val trxItems = mutableListOf<SettingItem>()
         trxItems.add(SettingItem(
             "pajak", "Keuangan & Pajak",
@@ -136,7 +135,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         add("TRANSAKSI" to trxItems)
 
-        // ═══ OUTPUT ═══
+        // OUTPUT
         val outItems = mutableListOf<SettingItem>()
         outItems.add(SettingItem(
             "laporan", "Laporan & Laba",
@@ -159,7 +158,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         add("OUTPUT" to outItems)
 
-        // ═══ TAMPILAN & SISTEM ═══
+        // TAMPILAN & SISTEM
         val sysItems = mutableListOf<SettingItem>()
         sysItems.add(SettingItem(
             "tema", "Tema",
@@ -175,7 +174,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         add("TAMPILAN & SISTEM" to sysItems)
 
-        // ═══ TENTANG ═══
+        // TENTANG
         add("TENTANG" to listOf(
             SettingItem(
                 "tentang", "Tentang Aplikasi",
@@ -185,7 +184,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         ))
     }
 
-    // Filter by search
     val filteredGroups = if (searchQuery.isBlank()) groups
     else groups.mapNotNull { (title, items) ->
         val filtered = items.filter {
@@ -209,7 +207,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             Modifier.padding(pad).fillMaxSize(),
             contentPadding = PaddingValues(bottom = 24.dp)
         ) {
-            // Header toko
             item {
                 Card(
                     Modifier.fillMaxWidth().padding(16.dp),
@@ -239,7 +236,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // User aktif
             user?.let { u ->
                 item {
                     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
@@ -278,7 +274,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Search bar
             item {
                 OutlinedTextField(
                     value = searchQuery, onValueChange = { searchQuery = it },
@@ -304,7 +299,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 )
             }
 
-            // Groups
             if (filteredGroups.isEmpty()) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(48.dp),
@@ -312,7 +306,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(Icons.Default.SearchOff, null,
                                 Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                MaterialTheme.colorScheme.onSurfaceVariant)
                             Spacer(Modifier.height(8.dp))
                             Text("Nggak ada pengaturan yang cocok",
                                 style = MaterialTheme.typography.bodySmall,
@@ -364,8 +358,7 @@ private fun SettingRow(item: SettingItem) {
                     .background(item.color.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(item.icon, null, tint = item.color,
-                    modifier = Modifier.size(22.dp))
+                Icon(item.icon, null, Modifier.size(22.dp), item.color)
             }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
@@ -385,7 +378,7 @@ private fun SettingRow(item: SettingItem) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// KEUANGAN & PAJAK (submenu)
+// KEUANGAN & PAJAK
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -421,7 +414,6 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // PPN Default
             item {
                 Card {
                     Column(Modifier.padding(16.dp)) {
@@ -432,12 +424,11 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.Receipt, null,
-                                    tint = Color(0xFF43A047), Modifier.size(22.dp))
+                                    Modifier.size(22.dp), Color(0xFF43A047))
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("PPN Default",
-                                    fontWeight = FontWeight.Bold)
+                                Text("PPN Default", fontWeight = FontWeight.Bold)
                                 Text("Otomatis diterapkan saat transaksi",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -462,7 +453,7 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             if (pajakDefault == 0) "PPN tidak otomatis diterapkan"
-                            else "PPN ${pajakDefault}% akan otomatis aktif di setiap transaksi",
+                            else "PPN ${pajakDefault}% otomatis di setiap transaksi",
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -470,7 +461,6 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Metode Pembayaran
             item {
                 Card {
                     Column(Modifier.padding(16.dp)) {
@@ -481,12 +471,11 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(Icons.Default.CreditCard, null,
-                                    tint = Color(0xFF1E88E5), Modifier.size(22.dp))
+                                    Modifier.size(22.dp), Color(0xFF1E88E5))
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
-                                Text("Metode Pembayaran",
-                                    fontWeight = FontWeight.Bold)
+                                Text("Metode Pembayaran", fontWeight = FontWeight.Bold)
                                 Text("Pilih metode yang tersedia di kasir",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -527,7 +516,6 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Suara
             item {
                 Card {
                     Row(Modifier.padding(16.dp),
@@ -538,7 +526,7 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Default.VolumeUp, null,
-                                tint = Color(0xFF9C27B0), Modifier.size(22.dp))
+                                Modifier.size(22.dp), Color(0xFF9C27B0))
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
@@ -562,7 +550,7 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// BARCODE INFO (info + cara pakai)
+// BARCODE INFO
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -592,7 +580,7 @@ fun BarcodeInfoRoute(app: IyonzApp, nav: NavHostController) {
                     Row(Modifier.padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.QrCodeScanner, null,
-                            tint = BRAND, modifier = Modifier.size(40.dp))
+                            Modifier.size(40.dp), BRAND)
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text("Barcode Aktif",
@@ -662,7 +650,7 @@ private fun InfoCard(icon: ImageVector, title: String, desc: String) {
                     .background(BRAND_LIGHT),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, null, tint = BRAND, modifier = Modifier.size(22.dp))
+                Icon(icon, null, Modifier.size(22.dp), BRAND)
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
