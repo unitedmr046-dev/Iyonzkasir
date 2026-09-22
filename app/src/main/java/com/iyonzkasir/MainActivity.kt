@@ -84,10 +84,10 @@ object Routes {
     const val TAB_POS = "tab_pos"
     const val TAB_OPEN_BILL = "tab_openbill"
     const val TAB_MENU = "tab_menu"
+    const val TAB_INVENTARIS = "tab_inventaris"
     const val TAB_RIWAYAT = "tab_riwayat"
     const val TAB_DASHBOARD = "tab_dashboard"
     const val TAB_SHIFT = "tab_shift"
-    const val TAB_INVENTARIS = "tab_inventaris"
     const val TAB_SETTINGS = "tab_settings"
 
     // Fullscreen
@@ -104,6 +104,7 @@ object Routes {
     const val CRM = "crm"
     const val INVENTARIS = "inventaris"
     const val KATEGORI = "kategori"
+    const val BARCODE_SCAN = "barcode_scan"
     const val TENTANG = "tentang"
 }
 
