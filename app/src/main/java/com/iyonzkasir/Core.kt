@@ -123,6 +123,19 @@ enum class MemberTier(val id: String, val label: String, val minBelanja: Int) {
     }
 }
 
+enum class StockMovementType(val id: String, val label: String) {
+    IN("IN", "Masuk"),
+    OUT("OUT", "Keluar"),
+    SALE("SALE", "Penjualan"),
+    VOID_RETURN("VOID_RETURN", "Retur Void"),
+    OPNAME("OPNAME", "Opname"),
+    ADJUST("ADJUST", "Koreksi");
+
+    companion object {
+        fun fromId(id: String) = values().firstOrNull { it.id == id } ?: ADJUST
+    }
+}
+
 // ═══════ FEATURE KEYS ═══════
 enum class FeatureKey(
     val key: String, val label: String, val kategori: String, val deskripsi: String = ""
@@ -140,13 +153,21 @@ enum class FeatureKey(
     VOID_REFUND("pos_void_refund", "Void / Refund", "POS", "Batalkan transaksi"),
     HOLD_ORDER("pos_hold_order", "Hold Order", "POS", "Tahan pesanan sementara"),
 
+    // Inventaris
     POTONG_STOK("inv_potong_stok", "Potong Stok Otomatis", "Inventaris", "Kurangi stok saat jual"),
     LOW_STOCK_ALERT("inv_low_stock", "Alert Stok Menipis", "Inventaris", "Notifikasi stok minim"),
+    STOCK_OPNAME("inv_opname", "Stock Opname", "Inventaris", "Koreksi stok fisik"),
+    STOCK_HISTORY("inv_history", "Riwayat Stok", "Inventaris", "Catat pergerakan stok"),
     RESEP("inv_resep", "Resep / Bahan Baku", "Inventaris", "Potong bahan saat jual"),
     PURCHASE_ORDER("inv_purchase_order", "Purchase Order", "Inventaris", "Order ke supplier"),
 
+    // Menu
+    KATEGORI_MGMT("menu_kategori", "Kelola Kategori", "Menu", "CRUD kategori menu"),
+
+    // Laporan
     LAPORAN_HARIAN("rep_harian", "Laporan Harian", "Laporan", "Ringkasan penjualan"),
     LABA_PER_PRODUK("rep_laba_produk", "Laba per Produk", "Laporan", "Analisa margin"),
+    GRAFIK("rep_grafik", "Grafik Penjualan", "Laporan", "Grafik & top produk"),
     SHIFT_KASIR("rep_shift", "Shift Kasir", "Laporan", "Buka & tutup shift"),
     LACI_KASIR("rep_laci_kasir", "Manajemen Laci Kasir", "Laporan", "Hitung uang fisik"),
     EXPORT_EXCEL("rep_export_excel", "Export Excel / CSV", "Laporan", "Export ke Excel"),
@@ -182,49 +203,58 @@ enum class FeatureKey(
     }
 }
 
-// ═══════ BUSINESS PRESET ═══════
 val BusinessType.defaultFeatures: Set<FeatureKey>
     get() = when (this) {
         BusinessType.WARUNG -> setOf(
             FeatureKey.OPEN_BILL, FeatureKey.DISKON, FeatureKey.VOID_REFUND,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
-            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT,
+            FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK
         )
         BusinessType.RETAIL -> setOf(
             FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
-            FeatureKey.LOW_STOCK_ALERT, FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
+            FeatureKey.LOW_STOCK_ALERT, FeatureKey.STOCK_OPNAME, FeatureKey.STOCK_HISTORY,
+            FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
             FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
-            FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.PRINTER_BT,
-            FeatureKey.EXPORT_EXCEL, FeatureKey.MEMBER, FeatureKey.VOUCHER,
-            FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.GRAFIK,
+            FeatureKey.PRINTER_BT, FeatureKey.EXPORT_EXCEL,
+            FeatureKey.MEMBER, FeatureKey.VOUCHER, FeatureKey.HUTANG_PELANGGAN,
+            FeatureKey.WHATSAPP_INTENT, FeatureKey.KATEGORI_MGMT
         )
         BusinessType.FNB -> setOf(
             FeatureKey.NOMOR_MEJA, FeatureKey.KITCHEN_PRINT, FeatureKey.MODIFIER,
             FeatureKey.SPLIT_BILL, FeatureKey.MERGE_BILL, FeatureKey.OPEN_BILL,
             FeatureKey.DISKON, FeatureKey.PAJAK, FeatureKey.VOID_REFUND,
             FeatureKey.HOLD_ORDER, FeatureKey.STATUS_DAPUR, FeatureKey.RESEP,
-            FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
+            FeatureKey.POTONG_STOK, FeatureKey.LOW_STOCK_ALERT, FeatureKey.STOCK_OPNAME,
+            FeatureKey.STOCK_HISTORY,
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.GRAFIK,
             FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
-            FeatureKey.MEMBER, FeatureKey.VOUCHER, FeatureKey.WHATSAPP_INTENT
+            FeatureKey.MEMBER, FeatureKey.VOUCHER, FeatureKey.WHATSAPP_INTENT,
+            FeatureKey.KATEGORI_MGMT
         )
         BusinessType.LAUNDRY -> setOf(
             FeatureKey.STATUS_LAUNDRY, FeatureKey.ESTIMASI_SELESAI,
             FeatureKey.DP_PEMBAYARAN, FeatureKey.PICKUP_DELIVERY, FeatureKey.OPEN_BILL,
             FeatureKey.WHATSAPP_INTENT, FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
-            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN,
+            FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK
         )
         BusinessType.TOKO_BANGUNAN -> setOf(
             FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
-            FeatureKey.LOW_STOCK_ALERT, FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
+            FeatureKey.LOW_STOCK_ALERT, FeatureKey.STOCK_OPNAME, FeatureKey.STOCK_HISTORY,
+            FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
             FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
             FeatureKey.OPEN_BILL, FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
-            FeatureKey.EXPORT_EXCEL, FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
-            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT
+            FeatureKey.GRAFIK, FeatureKey.EXPORT_EXCEL, FeatureKey.PRINTER_BT,
+            FeatureKey.SHIFT_KASIR, FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN,
+            FeatureKey.WHATSAPP_INTENT, FeatureKey.KATEGORI_MGMT
         )
         BusinessType.JASA -> setOf(
             FeatureKey.JADWAL_SERVIS, FeatureKey.REMINDER, FeatureKey.WHATSAPP_INTENT,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
-            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN,
+            FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK
         )
         BusinessType.CUSTOM -> emptySet()
     }
@@ -239,6 +269,7 @@ enum class PermissionKey(
 
     KELOLA_MENU("perm_menu", "Kelola Menu", "Menu", "Tambah/edit/hapus menu"),
     UBAH_HARGA("perm_harga", "Ubah Harga", "Menu", "Ubah harga produk"),
+    KELOLA_KATEGORI("perm_kategori", "Kelola Kategori", "Menu", "Tambah/edit kategori"),
 
     JUAL("perm_jual", "Jual / Buat Order", "POS", "Buat transaksi baru"),
     DISKON("perm_diskon", "Beri Diskon", "POS", "Beri diskon ke pelanggan"),
@@ -247,6 +278,7 @@ enum class PermissionKey(
 
     STOCK_OPNAME("perm_opname", "Stock Opname", "Inventaris", "Sesuaikan stok fisik"),
     KELOLA_STOK("perm_stok", "Kelola Stok", "Inventaris", "Tambah/kurangi stok manual"),
+    LIHAT_STOK("perm_lihat_stok", "Lihat Stok", "Inventaris", "Lihat stok & history"),
 
     LIHAT_LAPORAN("perm_laporan", "Lihat Laporan", "Laporan", "Akses semua laporan"),
     EXPORT_DATA("perm_export", "Export Data", "Laporan", "Export ke Excel/PDF"),
@@ -271,16 +303,22 @@ val UserRole.defaultPermissions: Set<PermissionKey>
     get() = when (this) {
         UserRole.OWNER -> PermissionKey.values().toSet()
         UserRole.SUPERVISOR -> setOf(
-            PermissionKey.LIHAT_DASHBOARD, PermissionKey.LIHAT_RIWAYAT, PermissionKey.BUKA_SETELAN,
+            PermissionKey.LIHAT_DASHBOARD, PermissionKey.LIHAT_RIWAYAT,
+            PermissionKey.BUKA_SETELAN,
             PermissionKey.KELOLA_MENU, PermissionKey.UBAH_HARGA,
+            PermissionKey.KELOLA_KATEGORI,
             PermissionKey.JUAL, PermissionKey.DISKON, PermissionKey.VOID_REFUND,
-            PermissionKey.OPEN_BILL, PermissionKey.STOCK_OPNAME, PermissionKey.KELOLA_STOK,
+            PermissionKey.OPEN_BILL,
+            PermissionKey.STOCK_OPNAME, PermissionKey.KELOLA_STOK,
+            PermissionKey.LIHAT_STOK,
             PermissionKey.LIHAT_LAPORAN, PermissionKey.EXPORT_DATA,
-            PermissionKey.KELOLA_MEMBER, PermissionKey.KELOLA_VOUCHER, PermissionKey.KELOLA_HUTANG
+            PermissionKey.KELOLA_MEMBER, PermissionKey.KELOLA_VOUCHER,
+            PermissionKey.KELOLA_HUTANG
         )
         UserRole.KASIR -> setOf(
             PermissionKey.LIHAT_RIWAYAT,
             PermissionKey.JUAL, PermissionKey.OPEN_BILL,
+            PermissionKey.LIHAT_STOK,
             PermissionKey.KELOLA_MEMBER, PermissionKey.KELOLA_HUTANG
         )
     }
@@ -299,19 +337,39 @@ object ThemeManager {
     fun update(m: ThemeMode) { mode = m }
 }
 
-// ═══════ LOYALTY CONFIG ═══════
+// ═══════ LOYALTY ═══════
 object LoyaltyConfig {
-    /** Rp X belanja → 1 poin */
     const val POIN_PER_RUPIAH = 10_000
-    /** 1 poin = Rp X diskon */
     const val RUPIAH_PER_POIN = 100
-
     fun hitungPoinDidapat(totalBelanja: Int): Int =
         if (POIN_PER_RUPIAH > 0) totalBelanja / POIN_PER_RUPIAH else 0
-
     fun poinKeRupiah(poin: Int): Int = poin * RUPIAH_PER_POIN
     fun rupiahKePoin(rupiah: Int): Int = if (RUPIAH_PER_POIN > 0)
         rupiah / RUPIAH_PER_POIN else 0
+}
+
+// ═══════ WARNA KATEGORI PRESET ═══════
+val KATEGORI_WARNA_PRESET = listOf(
+    "#FF6B35", // Orange (brand)
+    "#E53935", // Merah
+    "#8E24AA", // Ungu
+    "#3949AB", // Biru tua
+    "#1E88E5", // Biru
+    "#00897B", // Teal
+    "#43A047", // Hijau
+    "#FDD835", // Kuning
+    "#FB8C00", // Oranye
+    "#6D4C41", // Coklat
+    "#546E7A", // Abu
+    "#D81B60"  // Pink
+)
+
+fun String.toColorSafe(fallback: Color = BRAND): Color {
+    return try {
+        Color(android.graphics.Color.parseColor(this))
+    } catch (_: Exception) {
+        fallback
+    }
 }
 
 // ═══════ TEMA COMPOSABLE ═══════
