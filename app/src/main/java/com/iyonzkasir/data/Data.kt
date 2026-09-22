@@ -59,6 +59,16 @@ data class FeatureToggleEntity(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "kategori")
+data class Kategori(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val nama: String = "",
+    val warnaHex: String = "#FF6B35",
+    val urutan: Int = 0,
+    val aktif: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "menu_items")
 data class MenuItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -66,8 +76,28 @@ data class MenuItem(
     val harga: Int = 0,
     val hargaBeli: Int = 0,
     val kategori: String = "Umum",
+    val kategoriId: Long = 0,
     val fotoUri: String? = null,
-    val tersedia: Boolean = true
+    val tersedia: Boolean = true,
+    val trackStok: Boolean = false,
+    val stok: Int = 0,
+    val stokMinimal: Int = 5
+)
+
+@Entity(tableName = "stock_movements")
+data class StockMovement(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val menuId: Long = 0,
+    val namaMenu: String = "",
+    val tipe: String = StockMovementType.ADJUST.id,
+    val qty: Int = 0,
+    val stokSebelum: Int = 0,
+    val stokSesudah: Int = 0,
+    val keterangan: String = "",
+    val userId: String = "",
+    val userName: String = "",
+    val orderId: Long = 0,
+    val timestamp: Long = System.currentTimeMillis()
 )
 
 @Entity(tableName = "orders")
@@ -97,7 +127,8 @@ data class Order(
     val shiftId: Long = 0,
     val memberId: Long = 0,
     val memberNama: String = "",
-    val poinDidapat: Int = 0
+    val poinDidapat: Int = 0,
+    val stokDipotong: Boolean = false
 )
 
 @Entity(tableName = "order_items")
@@ -195,6 +226,11 @@ data class MemberStat(
     val memberId: Long, val totalOrder: Int, val totalOmzet: Int
 )
 
+data class MenuTerlaris(
+    val menuId: Long, val namaMenu: String,
+    val totalQty: Int, val totalOmzet: Int
+)
+
 // ═══════ DAOs ═══════
 
 @Dao
@@ -262,17 +298,59 @@ interface FeatureDao {
 }
 
 @Dao
+interface KategoriDao {
+    @Query("SELECT * FROM kategori ORDER BY urutan ASC, nama ASC")
+    fun observeAll(): Flow<List<Kategori>>
+    @Query("SELECT * FROM kategori ORDER BY urutan ASC, nama ASC")
+    suspend fun getAll(): List<Kategori>
+    @Query("SELECT * FROM kategori WHERE nama = :nama LIMIT 1")
+    suspend fun getByNama(nama: String): Kategori?
+    @Query("SELECT * FROM kategori WHERE id = :id")
+    suspend fun getById(id: Long): Kategori?
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(k: Kategori): Long
+    @Update
+    suspend fun update(k: Kategori)
+    @Delete
+    suspend fun delete(k: Kategori)
+    @Query("SELECT COALESCE(MAX(urutan), 0) FROM kategori")
+    suspend fun maxUrutan(): Int
+}
+
+@Dao
 interface MenuDao {
     @Query("SELECT * FROM menu_items ORDER BY kategori, nama")
     fun observeAll(): Flow<List<MenuItem>>
+    @Query("SELECT * FROM menu_items WHERE trackStok = 1 ORDER BY kategori, nama")
+    fun observeTrackStok(): Flow<List<MenuItem>>
     @Query("SELECT * FROM menu_items WHERE id = :id")
     suspend fun getById(id: Long): MenuItem?
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: MenuItem): Long
+    @Update
+    suspend fun update(item: MenuItem)
     @Delete
     suspend fun delete(item: MenuItem)
     @Query("UPDATE menu_items SET tersedia = :tersedia WHERE id = :id")
     suspend fun setTersedia(id: Long, tersedia: Boolean)
+    @Query("UPDATE menu_items SET stok = :stok WHERE id = :id")
+    suspend fun updateStok(id: Long, stok: Int)
+    @Query("SELECT COUNT(*) FROM menu_items WHERE trackStok = 1 AND stok <= stokMinimal")
+    fun countLowStock(): Flow<Int>
+    @Query("SELECT * FROM menu_items WHERE trackStok = 1 AND stok <= stokMinimal ORDER BY stok ASC")
+    fun observeLowStock(): Flow<List<MenuItem>>
+}
+
+@Dao
+interface StockDao {
+    @Query("SELECT * FROM stock_movements ORDER BY timestamp DESC LIMIT 500")
+    fun observeRecent(): Flow<List<StockMovement>>
+    @Query("SELECT * FROM stock_movements WHERE menuId = :menuId ORDER BY timestamp DESC LIMIT 200")
+    fun observeForMenu(menuId: Long): Flow<List<StockMovement>>
+    @Query("SELECT * FROM stock_movements ORDER BY timestamp DESC LIMIT 500")
+    suspend fun getRecent(): List<StockMovement>
+    @Insert
+    suspend fun insert(m: StockMovement): Long
 }
 
 @Dao
@@ -317,6 +395,8 @@ interface OrderDao {
     fun sumPajakSince(start: Long): Flow<Int>
     @Query("UPDATE orders SET status = :status, voidReason = :reason WHERE id = :id")
     suspend fun updateStatus(id: Long, status: String, reason: String)
+    @Query("UPDATE orders SET stokDipotong = :v WHERE id = :id")
+    suspend fun setStokDipotong(id: Long, v: Boolean)
 
     @Query("SELECT COUNT(*) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
     suspend fun countByShift(shiftId: Long): Int
@@ -329,10 +409,8 @@ interface OrderDao {
     @Query("SELECT COALESCE(SUM(pajakAmount), 0) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
     suspend fun sumPajakByShift(shiftId: Long): Int
 
-    // Laba per produk — pakai oi.hargaSatuan * oi.qty (bukan oi.subtotal yang computed)
     @Query("""
-        SELECT oi.menuId AS menuId,
-               oi.namaMenu AS namaMenu,
+        SELECT oi.menuId AS menuId, oi.namaMenu AS namaMenu,
                SUM(oi.qty) AS totalQty,
                SUM(oi.hargaSatuan * oi.qty) AS totalOmzet,
                SUM(oi.qty * COALESCE(m.hargaBeli, 0)) AS totalHpp
@@ -344,6 +422,19 @@ interface OrderDao {
         ORDER BY (SUM(oi.hargaSatuan * oi.qty) - SUM(oi.qty * COALESCE(m.hargaBeli, 0))) DESC
     """)
     suspend fun labaPerProduk(start: Long, end: Long): List<LabaProduk>
+
+    @Query("""
+        SELECT oi.menuId AS menuId, oi.namaMenu AS namaMenu,
+               SUM(oi.qty) AS totalQty,
+               SUM(oi.hargaSatuan * oi.qty) AS totalOmzet
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.orderId
+        WHERE o.status = 'PAID' AND o.timestamp >= :start AND o.timestamp <= :end
+        GROUP BY oi.menuId, oi.namaMenu
+        ORDER BY SUM(oi.qty) DESC
+        LIMIT :limit
+    """)
+    suspend fun menuTerlaris(start: Long, end: Long, limit: Int = 5): List<MenuTerlaris>
 
     @Query("SELECT * FROM orders WHERE status = 'PAID' AND timestamp >= :start AND timestamp <= :end ORDER BY timestamp ASC")
     suspend fun ordersInRange(start: Long, end: Long): List<Order>
@@ -539,15 +630,59 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
     }
 }
 
+val MIGRATION_7_8 = object : Migration(7, 8) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Menu stok fields
+        db.execSQL("ALTER TABLE menu_items ADD COLUMN kategoriId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE menu_items ADD COLUMN trackStok INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE menu_items ADD COLUMN stok INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE menu_items ADD COLUMN stokMinimal INTEGER NOT NULL DEFAULT 5")
+
+        // Order stok flag
+        db.execSQL("ALTER TABLE orders ADD COLUMN stokDipotong INTEGER NOT NULL DEFAULT 0")
+
+        // Kategori table
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `kategori` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `nama` TEXT NOT NULL DEFAULT '',
+                `warnaHex` TEXT NOT NULL DEFAULT '#FF6B35',
+                `urutan` INTEGER NOT NULL DEFAULT 0,
+                `aktif` INTEGER NOT NULL DEFAULT 1,
+                `createdAt` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+
+        // Stock movements table
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `stock_movements` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `menuId` INTEGER NOT NULL DEFAULT 0,
+                `namaMenu` TEXT NOT NULL DEFAULT '',
+                `tipe` TEXT NOT NULL DEFAULT 'ADJUST',
+                `qty` INTEGER NOT NULL DEFAULT 0,
+                `stokSebelum` INTEGER NOT NULL DEFAULT 0,
+                `stokSesudah` INTEGER NOT NULL DEFAULT 0,
+                `keterangan` TEXT NOT NULL DEFAULT '',
+                `userId` TEXT NOT NULL DEFAULT '',
+                `userName` TEXT NOT NULL DEFAULT '',
+                `orderId` INTEGER NOT NULL DEFAULT 0,
+                `timestamp` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+    }
+}
+
 // ═══════ DATABASE ═══════
 
 @Database(
     entities = [
         User::class, UserPermission::class, AuditLog::class, AppSetting::class,
-        FeatureToggleEntity::class, MenuItem::class, Order::class, OrderItem::class,
-        Shift::class, Member::class, Voucher::class, MemberTransaction::class
+        FeatureToggleEntity::class, Kategori::class, MenuItem::class,
+        StockMovement::class, Order::class, OrderItem::class, Shift::class,
+        Member::class, Voucher::class, MemberTransaction::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -556,7 +691,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun auditDao(): AuditDao
     abstract fun settingDao(): SettingDao
     abstract fun featureDao(): FeatureDao
+    abstract fun kategoriDao(): KategoriDao
     abstract fun menuDao(): MenuDao
+    abstract fun stockDao(): StockDao
     abstract fun orderDao(): OrderDao
     abstract fun shiftDao(): ShiftDao
     abstract fun memberDao(): MemberDao
@@ -573,7 +710,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "iyonzkasir.db"
                 ).addMigrations(
                     MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                    MIGRATION_5_6, MIGRATION_6_7
+                    MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8
                 ).build().also { INSTANCE = it }
             }
     }
@@ -708,6 +845,144 @@ class FeatureRepository(private val dao: FeatureDao) {
     }
 }
 
+class KategoriRepository(private val dao: KategoriDao) {
+    val all: Flow<List<Kategori>> = dao.observeAll()
+
+    suspend fun getAll() = dao.getAll()
+    suspend fun getById(id: Long) = dao.getById(id)
+    suspend fun getByNama(nama: String) = dao.getByNama(nama)
+
+    suspend fun save(k: Kategori): Long {
+        val id = if (k.id == 0L) {
+            // kategori baru — taruh di urutan paling akhir
+            val next = dao.maxUrutan() + 1
+            dao.upsert(k.copy(urutan = next))
+        } else {
+            dao.upsert(k)
+        }
+        return id
+    }
+    suspend fun delete(k: Kategori) = dao.delete(k)
+    suspend fun update(k: Kategori) = dao.update(k)
+}
+
+class StockRepository(
+    private val menuDao: MenuDao,
+    private val stockDao: StockDao,
+    private val userRepo: UserRepository
+) {
+    val movements: Flow<List<StockMovement>> = stockDao.observeRecent()
+    val lowStock: Flow<List<MenuItem>> = menuDao.observeLowStock()
+    val lowStockCount: Flow<Int> = menuDao.countLowStock()
+    val trackStokMenus: Flow<List<MenuItem>> = menuDao.observeTrackStok()
+
+    fun observeMovementsForMenu(menuId: Long) = stockDao.observeForMenu(menuId)
+
+    /** Sesuaikan stok manual (opname / koreksi). */
+    suspend fun adjustStock(
+        menuId: Long,
+        newStok: Int,
+        keterangan: String = "",
+        tipe: StockMovementType = StockMovementType.OPNAME
+    ): Boolean {
+        val menu = menuDao.getById(menuId) ?: return false
+        if (!menu.trackStok) return false
+        val sebelum = menu.stok
+        val sesudah = newStok.coerceAtLeast(0)
+        menuDao.updateStok(menuId, sesudah)
+        val u = Session.current
+        stockDao.insert(StockMovement(
+            menuId = menuId,
+            namaMenu = menu.nama,
+            tipe = tipe.id,
+            qty = sesudah - sebelum,
+            stokSebelum = sebelum,
+            stokSesudah = sesudah,
+            keterangan = keterangan,
+            userId = u?.id ?: "",
+            userName = u?.nama ?: ""
+        ))
+        return true
+    }
+
+    /** Tambah stok (restock/pemasukan). */
+    suspend fun tambahStok(
+        menuId: Long, jumlah: Int, keterangan: String = ""
+    ): Boolean {
+        if (jumlah <= 0) return false
+        val menu = menuDao.getById(menuId) ?: return false
+        if (!menu.trackStok) return false
+        val sebelum = menu.stok
+        val sesudah = sebelum + jumlah
+        menuDao.updateStok(menuId, sesudah)
+        val u = Session.current
+        stockDao.insert(StockMovement(
+            menuId = menuId,
+            namaMenu = menu.nama,
+            tipe = StockMovementType.IN.id,
+            qty = jumlah,
+            stokSebelum = sebelum,
+            stokSesudah = sesudah,
+            keterangan = keterangan,
+            userId = u?.id ?: "",
+            userName = u?.nama ?: ""
+        ))
+        return true
+    }
+
+    /** Potong stok karena penjualan. */
+    suspend fun potongStokPenjualan(
+        menuId: Long, qty: Int, orderId: Long
+    ): Boolean {
+        if (qty <= 0) return false
+        val menu = menuDao.getById(menuId) ?: return false
+        if (!menu.trackStok) return false
+        val sebelum = menu.stok
+        val sesudah = (sebelum - qty).coerceAtLeast(0)
+        menuDao.updateStok(menuId, sesudah)
+        val u = Session.current
+        stockDao.insert(StockMovement(
+            menuId = menuId,
+            namaMenu = menu.nama,
+            tipe = StockMovementType.SALE.id,
+            qty = -qty,
+            stokSebelum = sebelum,
+            stokSesudah = sesudah,
+            keterangan = "Penjualan order #$orderId",
+            userId = u?.id ?: "",
+            userName = u?.nama ?: "",
+            orderId = orderId
+        ))
+        return true
+    }
+
+    /** Kembalikan stok (saat void/refund). */
+    suspend fun kembalikanStok(
+        menuId: Long, qty: Int, orderId: Long, keterangan: String = "Retur void"
+    ): Boolean {
+        if (qty <= 0) return false
+        val menu = menuDao.getById(menuId) ?: return false
+        if (!menu.trackStok) return false
+        val sebelum = menu.stok
+        val sesudah = sebelum + qty
+        menuDao.updateStok(menuId, sesudah)
+        val u = Session.current
+        stockDao.insert(StockMovement(
+            menuId = menuId,
+            namaMenu = menu.nama,
+            tipe = StockMovementType.VOID_RETURN.id,
+            qty = qty,
+            stokSebelum = sebelum,
+            stokSesudah = sesudah,
+            keterangan = keterangan,
+            userId = u?.id ?: "",
+            userName = u?.nama ?: "",
+            orderId = orderId
+        ))
+        return true
+    }
+}
+
 class PosRepository(
     private val menuDao: MenuDao,
     private val orderDao: OrderDao,
@@ -729,6 +1004,9 @@ class PosRepository(
     suspend fun getOrder(id: Long) = orderDao.getOrder(id)
     suspend fun itemsOf(orderId: Long) = orderDao.itemsOf(orderId)
 
+    suspend fun markStokDipotong(orderId: Long, v: Boolean) =
+        orderDao.setStokDipotong(orderId, v)
+
     suspend fun voidOrder(id: Long, reason: String) =
         orderDao.updateStatus(id, OrderStatus.VOID.id, reason)
     suspend fun refundOrder(id: Long, reason: String) =
@@ -743,6 +1021,8 @@ class PosRepository(
     fun sumPajakSince(start: Long) = orderDao.sumPajakSince(start)
 
     suspend fun labaPerProduk(start: Long, end: Long) = orderDao.labaPerProduk(start, end)
+    suspend fun menuTerlaris(start: Long, end: Long, limit: Int = 5) =
+        orderDao.menuTerlaris(start, end, limit)
     suspend fun ordersInRange(start: Long, end: Long) = orderDao.ordersInRange(start, end)
 }
 
