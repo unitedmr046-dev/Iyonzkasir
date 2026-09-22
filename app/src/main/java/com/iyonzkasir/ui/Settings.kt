@@ -33,6 +33,18 @@ import com.iyonzkasir.data.*
 import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
+// SETTINGS ITEM DATA
+// ═══════════════════════════════════════════════════════════
+private data class SettingItem(
+    val key: String,
+    val title: String,
+    val subtitle: String,
+    val icon: ImageVector,
+    val color: Color,
+    val onClick: () -> Unit
+)
+
+// ═══════════════════════════════════════════════════════════
 // SETTINGS MAIN
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
@@ -44,6 +56,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     var businessType by remember { mutableStateOf(BusinessType.WARUNG) }
     var memberCount by remember { mutableIntStateOf(0) }
     var lowStockCount by remember { mutableIntStateOf(0) }
+    var searchQuery by remember { mutableStateOf("") }
     val enabled by FeatureManager.enabled.collectAsState()
 
     LaunchedEffect(Unit) {
@@ -57,12 +70,130 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         app.stockRepo.lowStockCount.collect { lowStockCount = it }
     }
 
-    val crmEnabled = FeatureKey.MEMBER in enabled || FeatureKey.VOUCHER in enabled
-            || FeatureKey.HUTANG_PELANGGAN in enabled
-    val stockEnabled = FeatureKey.LOW_STOCK_ALERT in enabled
-            || FeatureKey.POTONG_STOK in enabled
-            || FeatureKey.STOCK_OPNAME in enabled
+    val crmEnabled = FeatureKey.MEMBER in enabled ||
+            FeatureKey.VOUCHER in enabled ||
+            FeatureKey.HUTANG_PELANGGAN in enabled
+    val stockEnabled = FeatureKey.LOW_STOCK_ALERT in enabled ||
+            FeatureKey.POTONG_STOK in enabled ||
+            FeatureKey.STOCK_OPNAME in enabled
     val kategoriEnabled = FeatureKey.KATEGORI_MGMT in enabled
+    val barcodeEnabled = FeatureKey.BARCODE in enabled
+
+    // Build groups
+    val groups = buildList {
+        // ═══ TOKO ═══
+        val tokoItems = mutableListOf<SettingItem>()
+        tokoItems.add(SettingItem(
+            "profil", "Profil Toko",
+            "Nama, alamat, telepon, footer struk",
+            Icons.Default.Store, Color(0xFFFF6B35)
+        ) { if (Session.can(PermissionKey.PROFIL_TOKO)) nav.navigate(Routes.PROFIL_TOKO) })
+        if (kategoriEnabled && Session.can(PermissionKey.KELOLA_KATEGORI)) {
+            tokoItems.add(SettingItem(
+                "kategori", "Kelola Kategori",
+                "Tambah/edit kategori & warna",
+                Icons.Default.Category, Color(0xFF8E24AA)
+            ) { nav.navigate(Routes.KATEGORI) })
+        }
+        if (Session.can(PermissionKey.KELOLA_USER)) {
+            tokoItems.add(SettingItem(
+                "user", "Kelola Pengguna",
+                "Tambah user & atur izin",
+                Icons.Default.ManageAccounts, Color(0xFF1E88E5)
+            ) { nav.navigate(Routes.KELOLA_USER) })
+        }
+        if (tokoItems.isNotEmpty()) add("TOKO" to tokoItems)
+
+        // ═══ TRANSAKSI ═══
+        val trxItems = mutableListOf<SettingItem>()
+        trxItems.add(SettingItem(
+            "pajak", "Keuangan & Pajak",
+            "PPN default, metode bayar, profit",
+            Icons.Default.Payments, Color(0xFF43A047)
+        ) { nav.navigate(Routes.KEUANGAN) })
+        if (stockEnabled && Session.can(PermissionKey.LIHAT_STOK)) {
+            trxItems.add(SettingItem(
+                "stok", "Kelola Stok",
+                if (lowStockCount > 0) "⚠️ $lowStockCount menu stok menipis"
+                else "Stok, opname, riwayat pergerakan",
+                Icons.Default.Inventory, Color(0xFF00897B)
+            ) { nav.navigate(Routes.INVENTARIS) })
+        }
+        if (Session.can(PermissionKey.KELOLA_FITUR)) {
+            trxItems.add(SettingItem(
+                "fitur", "Kelola Fitur",
+                "Aktifkan / matikan fitur sesuai kebutuhan",
+                Icons.Default.Tune, Color(0xFFFB8C00)
+            ) { nav.navigate(Routes.FEATURE_TOGGLE) })
+        }
+        if (crmEnabled) {
+            trxItems.add(SettingItem(
+                "crm", "Member & Voucher",
+                if (memberCount > 0) "$memberCount member terdaftar"
+                else "Kelola member, poin & voucher",
+                Icons.Default.People, Color(0xFF6D4C41)
+            ) { nav.navigate(Routes.CRM) })
+        }
+        add("TRANSAKSI" to trxItems)
+
+        // ═══ OUTPUT ═══
+        val outItems = mutableListOf<SettingItem>()
+        outItems.add(SettingItem(
+            "laporan", "Laporan & Laba",
+            "Laporan lengkap, grafik, export CSV",
+            Icons.Default.Analytics, Color(0xFF3949AB)
+        ) { if (Session.can(PermissionKey.LIHAT_LAPORAN)) nav.navigate(Routes.LAPORAN) })
+        if (FeatureManager.isEnabled(FeatureKey.PRINTER_BT)) {
+            outItems.add(SettingItem(
+                "printer", "Printer & Struk",
+                "Sambungkan printer, ukuran kertas, format struk",
+                Icons.Default.Print, Color(0xFFD81B60)
+            ) { nav.navigate(Routes.PRINTER) })
+        }
+        if (barcodeEnabled) {
+            outItems.add(SettingItem(
+                "barcode", "Barcode Scanner",
+                "Scan dari kamera / galeri",
+                Icons.Default.QrCodeScanner, Color(0xFFE53935)
+            ) { nav.navigate(Routes.BARCODE_INFO) })
+        }
+        add("OUTPUT" to outItems)
+
+        // ═══ TAMPILAN & SISTEM ═══
+        val sysItems = mutableListOf<SettingItem>()
+        sysItems.add(SettingItem(
+            "tema", "Tema",
+            "Terang / Gelap / Ikut Sistem",
+            Icons.Default.Palette, Color(0xFF9C27B0)
+        ) { nav.navigate(Routes.TEMA) })
+        if (Session.can(PermissionKey.BACKUP_RESTORE)) {
+            sysItems.add(SettingItem(
+                "backup", "Backup & Restore",
+                "Simpan / pulihkan data ke file",
+                Icons.Default.Backup, Color(0xFF546E7A)
+            ) { nav.navigate(Routes.BACKUP) })
+        }
+        add("TAMPILAN & SISTEM" to sysItems)
+
+        // ═══ TENTANG ═══
+        add("TENTANG" to listOf(
+            SettingItem(
+                "tentang", "Tentang Aplikasi",
+                "iyonzkasir v0.7.0",
+                Icons.Default.Info, Color(0xFF607D8B)
+            ) { nav.navigate(Routes.TENTANG) }
+        ))
+    }
+
+    // Filter by search
+    val filteredGroups = if (searchQuery.isBlank()) groups
+    else groups.mapNotNull { (title, items) ->
+        val filtered = items.filter {
+            it.title.contains(searchQuery, true) ||
+            it.subtitle.contains(searchQuery, true)
+        }
+        if (filtered.isEmpty()) null else title to filtered
+    }
 
     Scaffold(
         topBar = {
@@ -111,7 +242,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
             // User aktif
             user?.let { u ->
                 item {
-                    SectionHeader("Pengguna Aktif")
                     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(
@@ -148,134 +278,69 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            // Toko
+            // Search bar
             item {
-                SectionHeader("Toko")
-                SettingsItem("Profil Toko", Icons.Default.Store,
-                    subtitle = "Nama, alamat, telepon, footer struk") {
-                    if (Session.can(PermissionKey.PROFIL_TOKO))
-                        nav.navigate(Routes.PROFIL_TOKO)
-                }
+                OutlinedTextField(
+                    value = searchQuery, onValueChange = { searchQuery = it },
+                    placeholder = { Text("Cari pengaturan...",
+                        style = MaterialTheme.typography.bodySmall) },
+                    leadingIcon = {
+                        Icon(Icons.Default.Search, null, Modifier.size(18.dp))
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" },
+                                modifier = Modifier.size(28.dp)) {
+                                Icon(Icons.Default.Close, null, Modifier.size(16.dp))
+                            }
+                        }
+                    },
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .height(52.dp)
+                )
             }
 
-            // Kategori
-            if (kategoriEnabled && Session.can(PermissionKey.KELOLA_KATEGORI)) {
+            // Groups
+            if (filteredGroups.isEmpty()) {
                 item {
-                    SectionHeader("Menu")
-                    SettingsItem("Kelola Kategori", Icons.Default.Category,
-                        subtitle = "Tambah/edit kategori & warna") {
-                        nav.navigate(Routes.KATEGORI)
+                    Box(Modifier.fillMaxWidth().padding(48.dp),
+                        contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.SearchOff, null,
+                                Modifier.size(48.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(8.dp))
+                            Text("Nggak ada pengaturan yang cocok",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
-            }
-
-            // Inventaris / Stok
-            if (stockEnabled && Session.can(PermissionKey.LIHAT_STOK)) {
-                item {
-                    if (kategoriEnabled && Session.can(PermissionKey.KELOLA_KATEGORI)) {
-                        // sudah ada header "Menu"
-                    } else {
-                        SectionHeader("Inventaris")
+            } else {
+                filteredGroups.forEach { (groupTitle, items) ->
+                    item {
+                        Text(groupTitle,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = BRAND,
+                            modifier = Modifier.padding(
+                                start = 20.dp, top = 16.dp, bottom = 6.dp
+                            ))
                     }
-                    SettingsItem("Kelola Stok", Icons.Default.Inventory,
-                        subtitle = if (lowStockCount > 0)
-                            "⚠️ $lowStockCount menu stok menipis"
-                        else "Stok, opname, riwayat pergerakan") {
-                        nav.navigate(Routes.INVENTARIS)
+                    items(items, key = { it.key }) { item ->
+                        SettingRow(item)
                     }
-                }
-            }
-
-            // Laporan
-            if (FeatureManager.isEnabled(FeatureKey.LABA_PER_PRODUK)
-                && Session.can(PermissionKey.LIHAT_LAPORAN)) {
-                item {
-                    SectionHeader("Laporan")
-                    SettingsItem("Laporan & Laba", Icons.Default.Analytics,
-                        subtitle = "Laba per produk, grafik, export CSV") {
-                        nav.navigate(Routes.LAPORAN)
-                    }
-                }
-            }
-
-            // CRM
-            if (crmEnabled) {
-                item {
-                    SectionHeader("CRM")
-                    SettingsItem("Member & Voucher", Icons.Default.People,
-                        subtitle = if (memberCount > 0) "$memberCount member terdaftar"
-                        else "Kelola member, poin & voucher") {
-                        nav.navigate(Routes.CRM)
-                    }
-                }
-            }
-
-            // Tampilan
-            item {
-                SectionHeader("Tampilan")
-                SettingsItem("Tema", Icons.Default.Palette,
-                    subtitle = "Terang / Gelap / Ikut Sistem") {
-                    nav.navigate(Routes.TEMA)
-                }
-            }
-
-            // Fitur
-            if (Session.can(PermissionKey.KELOLA_FITUR)) {
-                item {
-                    SectionHeader("Fitur Aplikasi")
-                    SettingsItem("Kelola Fitur", Icons.Default.Tune,
-                        subtitle = "Aktifkan / matikan fitur sesuai kebutuhan") {
-                        nav.navigate(Routes.FEATURE_TOGGLE)
-                    }
-                }
-            }
-
-            // Pengguna
-            if (Session.can(PermissionKey.KELOLA_USER)) {
-                item {
-                    SectionHeader("Pengguna & Keamanan")
-                    SettingsItem("Kelola Pengguna", Icons.Default.People,
-                        subtitle = "Tambah user & atur izin") {
-                        nav.navigate(Routes.KELOLA_USER)
-                    }
-                }
-            }
-
-            // Hardware
-            if (FeatureManager.isEnabled(FeatureKey.PRINTER_BT)) {
-                item {
-                    SectionHeader("Printer & Hardware")
-                    SettingsItem("Printer Bluetooth", Icons.Default.Print,
-                        subtitle = "Sambungkan & test printer struk") {
-                        nav.navigate(Routes.PRINTER)
-                    }
-                }
-            }
-
-            // Backup & Restore
-            if (Session.can(PermissionKey.BACKUP_RESTORE)) {
-                item {
-                    SectionHeader("Backup & Restore")
-                    SettingsItem("Backup & Restore", Icons.Default.Backup,
-                        subtitle = "Simpan / pulihkan data ke file") {
-                        nav.navigate(Routes.BACKUP)
-                    }
-                }
-            }
-
-            // Tentang
-            item {
-                SectionHeader("Tentang")
-                SettingsItem("Tentang Aplikasi", Icons.Default.Info,
-                    subtitle = "iyonzkasir v0.6.0") {
-                    nav.navigate(Routes.TENTANG)
                 }
             }
 
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.6.0 • Made with ❤️",
+                    Text("iyonzkasir v0.7.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -285,41 +350,329 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
 }
 
 @Composable
-private fun SectionHeader(text: String) {
-    Text(text,
-        style = MaterialTheme.typography.labelLarge,
-        fontWeight = FontWeight.Bold,
-        color = BRAND,
-        modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 8.dp))
-}
-
-@Composable
-private fun SettingsItem(
-    title: String, icon: ImageVector,
-    subtitle: String = "", onClick: () -> Unit
-) {
+private fun SettingRow(item: SettingItem) {
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = item.onClick),
         color = MaterialTheme.colorScheme.surface
     ) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, null, tint = BRAND, modifier = Modifier.size(24.dp))
-            Spacer(Modifier.width(16.dp))
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                    .background(item.color.copy(alpha = 0.15f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(item.icon, null, tint = item.color,
+                    modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Medium)
-                if (subtitle.isNotBlank()) {
-                    Text(subtitle, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(item.title, fontWeight = FontWeight.Medium)
+                if (item.subtitle.isNotBlank()) {
+                    Text(item.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2)
                 }
             }
             Icon(Icons.Default.ChevronRight, null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
-    HorizontalDivider(Modifier.padding(start = 60.dp), thickness = 0.5.dp)
+    HorizontalDivider(Modifier.padding(start = 70.dp), thickness = 0.5.dp)
+}
+
+// ═══════════════════════════════════════════════════════════
+// KEUANGAN & PAJAK (submenu)
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
+    val scope = rememberCoroutineScope()
+    var pajakDefault by remember { mutableIntStateOf(0) }
+    var soundEnabled by remember { mutableStateOf(true) }
+    var metodeAktif by remember { mutableStateOf<Set<String>>(emptySet()) }
+
+    LaunchedEffect(Unit) {
+        pajakDefault = app.settingRepo.getPajakDefault()
+        soundEnabled = app.settingRepo.isSoundEnabled()
+        metodeAktif = app.settingRepo.getMetodeAktif()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Keuangan & Pajak") },
+                navigationIcon = {
+                    IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White
+                )
+            )
+        }
+    ) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // PPN Default
+            item {
+                Card {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF43A047).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Receipt, null,
+                                    tint = Color(0xFF43A047), Modifier.size(22.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("PPN Default",
+                                    fontWeight = FontWeight.Bold)
+                                Text("Otomatis diterapkan saat transaksi",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(0, 5, 10, 11, 12, 15).forEach { p ->
+                                FilterChip(
+                                    selected = pajakDefault == p,
+                                    onClick = {
+                                        pajakDefault = p
+                                        scope.launch {
+                                            app.settingRepo.setPajakDefault(p)
+                                        }
+                                    },
+                                    label = { Text(if (p == 0) "Off" else "$p%",
+                                        style = MaterialTheme.typography.bodySmall) }
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            if (pajakDefault == 0) "PPN tidak otomatis diterapkan"
+                            else "PPN ${pajakDefault}% akan otomatis aktif di setiap transaksi",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            // Metode Pembayaran
+            item {
+                Card {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xFF1E88E5).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.CreditCard, null,
+                                    tint = Color(0xFF1E88E5), Modifier.size(22.dp))
+                            }
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Metode Pembayaran",
+                                    fontWeight = FontWeight.Bold)
+                                Text("Pilih metode yang tersedia di kasir",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        PaymentMethod.values().forEach { m ->
+                            val aktif = m.id in metodeAktif
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .clickable {
+                                        val newSet = if (aktif) metodeAktif - m.id
+                                        else metodeAktif + m.id
+                                        metodeAktif = newSet
+                                        scope.launch {
+                                            app.settingRepo.setMetodeAktif(newSet)
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Checkbox(
+                                    checked = aktif,
+                                    onCheckedChange = { c ->
+                                        val newSet = if (c) metodeAktif + m.id
+                                        else metodeAktif - m.id
+                                        metodeAktif = newSet
+                                        scope.launch {
+                                            app.settingRepo.setMetodeAktif(newSet)
+                                        }
+                                    }
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(m.label)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Suara
+            item {
+                Card {
+                    Row(Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF9C27B0).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.VolumeUp, null,
+                                tint = Color(0xFF9C27B0), Modifier.size(22.dp))
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Suara", fontWeight = FontWeight.Bold)
+                            Text("Bunyi saat transaksi berhasil",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Switch(
+                            checked = soundEnabled,
+                            onCheckedChange = {
+                                soundEnabled = it
+                                scope.launch { app.settingRepo.setSoundEnabled(it) }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// BARCODE INFO (info + cara pakai)
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun BarcodeInfoRoute(app: IyonzApp, nav: NavHostController) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Barcode Scanner") },
+                navigationIcon = {
+                    IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White
+                )
+            )
+        }
+    ) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                    Row(Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.QrCodeScanner, null,
+                            tint = BRAND, modifier = Modifier.size(40.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Barcode Aktif",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium)
+                            Text("Scan barcode langsung dari kamera HP",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
+                }
+            }
+
+            item {
+                InfoCard(
+                    icon = Icons.Default.Restaurant,
+                    title = "1. Setiap menu bisa punya barcode",
+                    desc = "Edit menu → isi field Barcode (scan atau ketik manual)"
+                )
+            }
+            item {
+                InfoCard(
+                    icon = Icons.Default.PointOfSale,
+                    title = "2. Scan di layar Kasir",
+                    desc = "Tap ikon scan di kanan atas Kasir → arahkan ke barcode → otomatis masuk keranjang"
+                )
+            }
+            item {
+                InfoCard(
+                    icon = Icons.Default.Image,
+                    title = "3. Scan dari galeri",
+                    desc = "Punya foto barcode? Bisa scan dari galeri tanpa kamera"
+                )
+            }
+            item {
+                InfoCard(
+                    icon = Icons.Default.QrCode,
+                    title = "Format didukung",
+                    desc = "EAN-13, EAN-8, UPC, Code-128, Code-39, QR Code, Data Matrix, PDF417, Aztec"
+                )
+            }
+            item {
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("💡 Tips",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(6.dp))
+                        Text("• Barcode paling berguna untuk: toko retail, warung, toko bangunan\n" +
+                             "• Untuk F&B: bisa pakai barcode custom (print sendiri atau beli label)\n" +
+                             "• Untuk laundry/jasa: biasanya tidak perlu",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun InfoCard(icon: ImageVector, title: String, desc: String) {
+    Card {
+        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                    .background(BRAND_LIGHT),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(icon, null, tint = BRAND, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.bodyMedium)
+                Text(desc, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -454,7 +807,13 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
             ) {
                 grouped.forEach { (kategori, items) ->
                     item {
-                        SectionHeader("$kategori (${items.count { it.second }}/${items.size})")
+                        Text("$kategori (${items.count { it.second }}/${items.size})",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = BRAND,
+                            modifier = Modifier.padding(
+                                start = 20.dp, top = 16.dp, bottom = 6.dp
+                            ))
                     }
                     items(items, key = { it.first.key }) { (feature, enabled) ->
                         FeatureToggleRow(
@@ -721,7 +1080,7 @@ fun TentangRoute(nav: NavHostController) {
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.6.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.7.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
             Text(
