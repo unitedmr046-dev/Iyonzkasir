@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -26,6 +27,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -53,7 +57,8 @@ data class CartLine(
 
 class KasirViewModel(
     private val repo: PosRepository,
-    private val crmRepo: CrmRepository
+    private val crmRepo: CrmRepository,
+    private val stockRepo: StockRepository
 ) : ViewModel() {
     val menu: StateFlow<List<MenuItem>> = repo.menu
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -229,7 +234,8 @@ class KasirViewModel(
                 status = OrderStatus.OPEN.id,
                 shiftId = shiftId,
                 memberId = selectedMember?.id ?: 0,
-                memberNama = selectedMember?.nama ?: ""
+                memberNama = selectedMember?.nama ?: "",
+                stokDipotong = false // open bill belum potong
             )
             if (existingId != null) repo.updateOrderWithItems(order, items)
             else repo.simpanOrder(order, items)
@@ -257,6 +263,7 @@ class KasirViewModel(
             val member = selectedMember
             val poinDidapat = if (member != null)
                 LoyaltyConfig.hitungPoinDidapat(totalInt) else 0
+            val potongStok = FeatureManager.isEnabled(FeatureKey.POTONG_STOK)
 
             val order = Order(
                 id = existingId ?: 0,
@@ -277,12 +284,24 @@ class KasirViewModel(
                 shiftId = shiftId,
                 memberId = member?.id ?: 0,
                 memberNama = member?.nama ?: "",
-                poinDidapat = poinDidapat
+                poinDidapat = poinDidapat,
+                stokDipotong = false
             )
             val id: Long = if (existingId != null) {
                 repo.updateOrderWithItems(order, items); existingId
             } else repo.simpanOrder(order, items)
 
+            // ═══ POTONG STOK ═══
+            if (potongStok) {
+                try {
+                    items.forEach { it ->
+                        stockRepo.potongStokPenjualan(it.menuId, it.qty, id)
+                    }
+                    repo.markStokDipotong(id, true)
+                } catch (_: Exception) {}
+            }
+
+            // ═══ CRM: poin & hutang ═══
             if (member != null) {
                 try {
                     if (poinDipakai > 0) crmRepo.redeemPoin(member.id, poinDipakai)
@@ -296,9 +315,15 @@ class KasirViewModel(
     }
 }
 
-class MenuViewModel(private val repo: PosRepository) : ViewModel() {
+class MenuViewModel(
+    private val repo: PosRepository,
+    private val kategoriRepo: KategoriRepository
+) : ViewModel() {
     val menu: StateFlow<List<MenuItem>> = repo.menu
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+    val kategori: StateFlow<List<Kategori>> = kategoriRepo.all
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     fun save(item: MenuItem, onDone: () -> Unit = {}) = viewModelScope.launch {
         repo.upsertMenu(item); onDone()
     }
@@ -317,13 +342,48 @@ class OpenBillViewModel(repo: PosRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 }
 
-class RiwayatViewModel(private val repo: PosRepository) : ViewModel() {
+class RiwayatViewModel(
+    private val repo: PosRepository,
+    private val stockRepo: StockRepository
+) : ViewModel() {
     val orders: StateFlow<List<Order>> = repo.paidOrders
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     fun voidOrder(id: Long, reason: String, onDone: () -> Unit = {}) =
-        viewModelScope.launch { repo.voidOrder(id, reason); onDone() }
+        viewModelScope.launch {
+            val order = repo.getOrder(id)
+            val items = repo.itemsOf(id)
+            repo.voidOrder(id, reason)
+            // Kembalikan stok kalau sebelumnya udah dipotong
+            if (order?.stokDipotong == true) {
+                try {
+                    items.forEach { it ->
+                        stockRepo.kembalikanStok(it.menuId, it.qty, id,
+                            "Void order #$id: $reason")
+                    }
+                    repo.markStokDipotong(id, false)
+                } catch (_: Exception) {}
+            }
+            onDone()
+        }
+
     fun refundOrder(id: Long, reason: String, onDone: () -> Unit = {}) =
-        viewModelScope.launch { repo.refundOrder(id, reason); onDone() }
+        viewModelScope.launch {
+            val order = repo.getOrder(id)
+            val items = repo.itemsOf(id)
+            repo.refundOrder(id, reason)
+            if (order?.stokDipotong == true) {
+                try {
+                    items.forEach { it ->
+                        stockRepo.kembalikanStok(it.menuId, it.qty, id,
+                            "Refund order #$id: $reason")
+                    }
+                    repo.markStokDipotong(id, false)
+                } catch (_: Exception) {}
+            }
+            onDone()
+        }
+
     suspend fun itemsOf(orderId: Long) = repo.itemsOf(orderId)
     suspend fun getOrder(id: Long) = repo.getOrder(id)
 }
@@ -347,19 +407,72 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val transaksiTerakhir: StateFlow<List<Order>> = repo.observePaidSince(startOfDay)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    private val _grafik = MutableStateFlow<List<HariPenjualan>>(emptyList())
+    val grafik: StateFlow<List<HariPenjualan>> = _grafik.asStateFlow()
+
+    private val _topMenu = MutableStateFlow<List<MenuTerlaris>>(emptyList())
+    val topMenu: StateFlow<List<MenuTerlaris>> = _topMenu.asStateFlow()
+
+    init { loadExtras() }
+
+    fun loadExtras() {
+        viewModelScope.launch {
+            // Grafik 7 hari
+            val cal = java.util.Calendar.getInstance()
+            cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+            cal.set(java.util.Calendar.MINUTE, 0)
+            cal.set(java.util.Calendar.SECOND, 0)
+            cal.set(java.util.Calendar.MILLISECOND, 0)
+            val startToday = cal.timeInMillis
+            val start = startToday - 6L * 24 * 60 * 60 * 1000
+            val end = startToday + 24L * 60 * 60 * 1000 - 1
+            val orders = repo.ordersInRange(start, end)
+            val fmt = java.text.SimpleDateFormat("dd/MM", java.util.Locale("id"))
+            val map = mutableMapOf<Long, Pair<Int, Int>>()
+            for (i in 0..6) {
+                map[start + i * 24L * 60 * 60 * 1000] = 0 to 0
+            }
+            orders.forEach { o ->
+                val c = java.util.Calendar.getInstance()
+                c.timeInMillis = o.timestamp
+                c.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                c.set(java.util.Calendar.MINUTE, 0)
+                c.set(java.util.Calendar.SECOND, 0)
+                c.set(java.util.Calendar.MILLISECOND, 0)
+                val dayStart = c.timeInMillis
+                val prev = map[dayStart] ?: (0 to 0)
+                map[dayStart] = (prev.first + 1) to (prev.second + o.total)
+            }
+            _grafik.value = map.entries.sortedBy { it.key }.map { (day, pair) ->
+                HariPenjualan(
+                    label = fmt.format(java.util.Date(day)),
+                    omzet = pair.second,
+                    transaksi = pair.first
+                )
+            }
+
+            // Top menu dari 7 hari
+            _topMenu.value = repo.menuTerlaris(start, end, 5)
+        }
+    }
 }
 
 class PosVMFactory(
     private val repo: PosRepository,
-    private val crmRepo: CrmRepository
+    private val crmRepo: CrmRepository,
+    private val stockRepo: StockRepository,
+    private val kategoriRepo: KategoriRepository
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = when {
         modelClass.isAssignableFrom(KasirViewModel::class.java) ->
-            KasirViewModel(repo, crmRepo) as T
-        modelClass.isAssignableFrom(MenuViewModel::class.java) -> MenuViewModel(repo) as T
+            KasirViewModel(repo, crmRepo, stockRepo) as T
+        modelClass.isAssignableFrom(MenuViewModel::class.java) ->
+            MenuViewModel(repo, kategoriRepo) as T
         modelClass.isAssignableFrom(OpenBillViewModel::class.java) -> OpenBillViewModel(repo) as T
-        modelClass.isAssignableFrom(RiwayatViewModel::class.java) -> RiwayatViewModel(repo) as T
+        modelClass.isAssignableFrom(RiwayatViewModel::class.java) ->
+            RiwayatViewModel(repo, stockRepo) as T
         modelClass.isAssignableFrom(DashboardViewModel::class.java) -> DashboardViewModel(repo) as T
         else -> error("VM tidak dikenal: ${modelClass.name}")
     }
@@ -373,8 +486,13 @@ private fun activityOwner(): ComponentActivity =
     LocalContext.current as ComponentActivity
 
 @Composable
+private fun posFactory(app: IyonzApp) = remember {
+    PosVMFactory(app.posRepo, app.crmRepo, app.stockRepo, app.kategoriRepo)
+}
+
+@Composable
 fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     PosScreen(vm,
@@ -384,7 +502,7 @@ fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController)
 
 @Composable
 fun KeranjangRoute(app: IyonzApp, nav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     KeranjangScreen(vm,
@@ -394,7 +512,7 @@ fun KeranjangRoute(app: IyonzApp, nav: NavHostController) {
 
 @Composable
 fun BayarRoute(app: IyonzApp, nav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
     val scope = rememberCoroutineScope()
@@ -488,7 +606,7 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
 
 @Composable
 fun OpenBillRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val vm: OpenBillViewModel = viewModel(factory = factory)
     val owner = activityOwner()
     val kasirVm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
@@ -500,7 +618,7 @@ fun OpenBillRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostContro
 
 @Composable
 fun MenuRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val vm: MenuViewModel = viewModel(factory = factory)
     MenuScreen(vm) { id ->
         nav.navigate(if (id == null) Routes.EDIT_MENU else "${Routes.EDIT_MENU}/$id")
@@ -509,21 +627,21 @@ fun MenuRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController
 
 @Composable
 fun EditMenuRoute(app: IyonzApp, nav: NavHostController, menuId: Long?) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val vm: MenuViewModel = viewModel(factory = factory)
     EditMenuScreen(vm, menuId) { nav.popBackStack() }
 }
 
 @Composable
 fun RiwayatRoute(app: IyonzApp) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val vm: RiwayatViewModel = viewModel(factory = factory)
     RiwayatScreen(vm)
 }
 
 @Composable
 fun DashboardRoute(app: IyonzApp) {
-    val factory = remember { PosVMFactory(app.posRepo, app.crmRepo) }
+    val factory = posFactory(app)
     val vm: DashboardViewModel = viewModel(factory = factory)
     DashboardScreen(vm)
 }
@@ -722,23 +840,40 @@ private fun OrderMetaBar(vm: KasirViewModel) {
 
 @Composable
 private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
+    val stokHabis = m.trackStok && m.stok <= 0
+    val efektifEnabled = enabled && !stokHabis
     Card(
-        modifier = Modifier.fillMaxWidth().height(160.dp)
-            .clickable(enabled = enabled, onClick = onClick),
+        modifier = Modifier.fillMaxWidth().height(175.dp)
+            .clickable(enabled = efektifEnabled, onClick = onClick),
         shape = RoundedCornerShape(12.dp)
     ) {
         Column {
-            Box(Modifier.fillMaxWidth().height(96.dp)
+            Box(Modifier.fillMaxWidth().height(100.dp)
                 .background(MaterialTheme.colorScheme.surfaceVariant)) {
                 m.fotoUri?.let { uri ->
                     AsyncImage(model = uri, contentDescription = m.nama,
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize())
                 }
-                if (!enabled) {
+                if (!efektifEnabled) {
                     Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
                         contentAlignment = Alignment.Center) {
-                        Text("Habis", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(if (stokHabis) "Stok Habis" else "Habis",
+                            color = Color.White, fontWeight = FontWeight.Bold)
+                    }
+                }
+                // Badge stok kalau track stok
+                if (m.trackStok && !stokHabis) {
+                    Surface(
+                        modifier = Modifier.padding(6.dp).align(Alignment.TopEnd),
+                        color = if (m.stok <= m.stokMinimal) DANGER else BRAND,
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Text("${m.stok}",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1770,6 +1905,8 @@ private fun MenuRow(
     m: MenuItem, onToggle: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit,
     canEdit: Boolean
 ) {
+    val stokHabis = m.trackStok && m.stok <= 0
+    val stokLow = m.trackStok && m.stok in 1..m.stokMinimal
     Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             if (m.fotoUri != null) {
@@ -1783,7 +1920,26 @@ private fun MenuRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(m.nama, fontWeight = FontWeight.SemiBold)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(m.nama, fontWeight = FontWeight.SemiBold)
+                    if (m.trackStok) {
+                        Spacer(Modifier.width(6.dp))
+                        Surface(
+                            color = when {
+                                stokHabis -> DANGER
+                                stokLow -> WARNING
+                                else -> BRAND
+                            },
+                            shape = RoundedCornerShape(4.dp)
+                        ) {
+                            Text("${m.stok}",
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+                                color = Color.White,
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
                 Text(m.harga.rupiah(), color = BRAND)
                 Text(m.kategori, style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1803,22 +1959,37 @@ private fun MenuRow(
 fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val kategoriList by vm.kategori.collectAsState()
+
     var nama by remember { mutableStateOf("") }
     var hargaText by remember { mutableStateOf("") }
     var hargaBeliText by remember { mutableStateOf("") }
-    var kategori by remember { mutableStateOf("Umum") }
+    var kategoriNama by remember { mutableStateOf("Umum") }
+    var kategoriId by remember { mutableStateOf(0L) }
     var fotoUri by remember { mutableStateOf<String?>(null) }
     var originalPhotoUri by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
+
+    // Stock fields
+    var trackStok by remember { mutableStateOf(false) }
+    var stokText by remember { mutableStateOf("0") }
+    var stokMinimalText by remember { mutableStateOf("5") }
+
     var loaded by remember { mutableStateOf(menuId == null) }
+    var showKategoriDropdown by remember { mutableStateOf(false) }
 
     LaunchedEffect(menuId) {
         if (menuId != null) {
             vm.get(menuId)?.let {
                 nama = it.nama; hargaText = it.harga.toString()
                 hargaBeliText = if (it.hargaBeli > 0) it.hargaBeli.toString() else ""
-                kategori = it.kategori; fotoUri = it.fotoUri; tersedia = it.tersedia
+                kategoriNama = it.kategori
+                kategoriId = it.kategoriId
+                fotoUri = it.fotoUri; tersedia = it.tersedia
                 originalPhotoUri = it.fotoUri
+                trackStok = it.trackStok
+                stokText = it.stok.toString()
+                stokMinimalText = it.stokMinimal.toString()
             }
             loaded = true
         }
@@ -1851,7 +2022,8 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 CircularProgressIndicator()
             }
         } else {
-            Column(Modifier.padding(pad).padding(16.dp).fillMaxSize(),
+            Column(Modifier.padding(pad).padding(16.dp).fillMaxSize()
+                .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 fotoUri?.let { uri ->
                     AsyncImage(model = uri, contentDescription = null,
@@ -1868,6 +2040,60 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 OutlinedTextField(nama, { nama = it },
                     label = { Text("Nama menu") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
+
+                // ── KATEGORI DROPDOWN ──
+                Box {
+                    OutlinedTextField(
+                        value = kategoriNama,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("Kategori") },
+                        trailingIcon = {
+                            IconButton(onClick = { showKategoriDropdown = true }) {
+                                Icon(Icons.Default.ArrowDropDown, null)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            showKategoriDropdown = true
+                        }
+                    )
+                    // Transparan overlay biar tap langsung buka dropdown
+                    Box(Modifier.matchParentSize().clickable {
+                        showKategoriDropdown = true
+                    })
+                }
+                DropdownMenu(
+                    expanded = showKategoriDropdown,
+                    onDismissRequest = { showKategoriDropdown = false }
+                ) {
+                    if (kategoriList.isEmpty()) {
+                        DropdownMenuItem(
+                            text = { Text("Belum ada kategori — bikin dulu di Setelan") },
+                            onClick = { showKategoriDropdown = false }
+                        )
+                    } else {
+                        kategoriList.forEach { k ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            Modifier.size(14.dp).clip(CircleShape)
+                                                .background(k.warnaHex.toColorSafe(BRAND))
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(k.nama)
+                                    }
+                                },
+                                onClick = {
+                                    kategoriNama = k.nama
+                                    kategoriId = k.id
+                                    showKategoriDropdown = false
+                                }
+                            )
+                        }
+                    }
+                }
+
                 OutlinedTextField(hargaText,
                     { hargaText = it.filter { c -> c.isDigit() } },
                     label = { Text("Harga jual") },
@@ -1880,19 +2106,67 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                         style = MaterialTheme.typography.labelSmall) },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
-                OutlinedTextField(kategori, { kategori = it },
-                    label = { Text("Kategori") },
-                    modifier = Modifier.fillMaxWidth(), singleLine = true)
+
+                // ── TRACK STOK ──
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Track Stok", fontWeight = FontWeight.SemiBold)
+                                Text("Pantau & potong stok otomatis saat jual",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Switch(checked = trackStok,
+                                onCheckedChange = { trackStok = it })
+                        }
+                        if (trackStok) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = stokText,
+                                    onValueChange = {
+                                        stokText = it.filter { c -> c.isDigit() }.take(7)
+                                    },
+                                    label = { Text("Stok") },
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = stokMinimalText,
+                                    onValueChange = {
+                                        stokMinimalText = it.filter { c -> c.isDigit() }.take(5)
+                                    },
+                                    label = { Text("Stok min") },
+                                    keyboardOptions = KeyboardOptions(
+                                        keyboardType = KeyboardType.Number),
+                                    singleLine = true,
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                            Text("Stok opname & riwayat bisa diakses di tab Stok",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Tersedia", Modifier.weight(1f))
                     Switch(checked = tersedia, onCheckedChange = { tersedia = it })
                 }
-                Spacer(Modifier.weight(1f))
+
+                Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
                         val harga = hargaText.toIntOrNull() ?: 0
                         if (nama.isBlank() || harga <= 0) return@Button
                         val hargaBeli = hargaBeliText.toIntOrNull() ?: 0
+                        val stok = if (trackStok) stokText.toIntOrNull() ?: 0 else 0
+                        val stokMin = if (trackStok) stokMinimalText.toIntOrNull() ?: 5 else 5
                         if (menuId != null && originalPhotoUri != null
                             && originalPhotoUri != fotoUri
                             && MenuPhotoManager.isInternalPath(originalPhotoUri)) {
@@ -1902,13 +2176,18 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                             id = menuId ?: 0,
                             nama = nama.trim(), harga = harga,
                             hargaBeli = hargaBeli,
-                            kategori = kategori.trim().ifBlank { "Umum" },
-                            fotoUri = fotoUri, tersedia = tersedia
+                            kategori = kategoriNama.trim().ifBlank { "Umum" },
+                            kategoriId = kategoriId,
+                            fotoUri = fotoUri, tersedia = tersedia,
+                            trackStok = trackStok,
+                            stok = stok,
+                            stokMinimal = stokMin
                         )) { onBack() }
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = BRAND)
                 ) { Text("Simpan") }
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
@@ -2122,6 +2401,15 @@ private fun OrderDetailDialog(
                             style = MaterialTheme.typography.bodySmall)
                     }
                 }
+                if (order.stokDipotong) {
+                    Row {
+                        Text("Stok", Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("✓ sudah dipotong",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = SUCCESS)
+                    }
+                }
 
                 Spacer(Modifier.height(12.dp))
 
@@ -2317,63 +2605,211 @@ fun DashboardScreen(vm: DashboardViewModel) {
     val diskon by vm.diskonHariIni.collectAsState()
     val pajak by vm.pajakHariIni.collectAsState()
     val recent by vm.transaksiTerakhir.collectAsState()
+    val grafik by vm.grafik.collectAsState()
+    val topMenu by vm.topMenu.collectAsState()
 
     Scaffold(topBar = { TopAppBar(title = { Text("Dashboard") }) }) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp),
+        LazyColumn(Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Hari Ini", style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold)
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                StatCard("Transaksi", trx.toString(),
-                    Icons.Default.Receipt, Modifier.weight(1f))
-                StatCard("Omzet", omzet.rupiah(),
-                    Icons.Default.AttachMoney, Modifier.weight(1f))
+
+            item {
+                Text("Hari Ini", style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold)
             }
-            if (diskon > 0 || pajak > 0) {
+            item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    if (diskon > 0)
-                        StatCard("Diskon", "- " + diskon.rupiah(),
-                            Icons.Default.LocalOffer, Modifier.weight(1f))
-                    if (pajak > 0)
-                        StatCard("PPN", pajak.rupiah(),
-                            Icons.Default.Receipt, Modifier.weight(1f))
+                    StatCard("Transaksi", trx.toString(),
+                        Icons.Default.Receipt, Modifier.weight(1f))
+                    StatCard("Omzet", omzet.rupiah(),
+                        Icons.Default.AttachMoney, Modifier.weight(1f))
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            Text("Transaksi Terakhir", fontWeight = FontWeight.SemiBold)
-            if (recent.isEmpty()) {
-                Text("Belum ada transaksi hari ini",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(recent.take(20), key = { it.id }) { order ->
-                        Card(Modifier.fillMaxWidth()) {
-                            Row(Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        order.timestamp.jamPendek() + " • " +
-                                        PaymentMethod.fromId(order.metodeBayar).label,
-                                        fontWeight = FontWeight.SemiBold
-                                    )
-                                    Text(
-                                        if (order.memberNama.isNotBlank())
-                                            "⭐ ${order.memberNama}"
-                                        else if (order.nomorMeja.isNotBlank())
-                                            "Meja ${order.nomorMeja}"
-                                        else "Tanpa meja",
-                                        style = MaterialTheme.typography.bodySmall
-                                    )
+            if (diskon > 0 || pajak > 0) {
+                item {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        if (diskon > 0)
+                            StatCard("Diskon", "- " + diskon.rupiah(),
+                                Icons.Default.LocalOffer, Modifier.weight(1f))
+                        if (pajak > 0)
+                            StatCard("PPN", pajak.rupiah(),
+                                Icons.Default.Receipt, Modifier.weight(1f))
+                    }
+                }
+            }
+
+            // ═══ GRAFIK 7 HARI ═══
+            if (FeatureManager.isEnabled(FeatureKey.GRAFIK)) {
+                item {
+                    Card {
+                        Column(Modifier.padding(16.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.BarChart, null, tint = BRAND)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Penjualan 7 Hari",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                            Spacer(Modifier.height(12.dp))
+                            BarChart7Hari(grafik)
+                        }
+                    }
+                }
+
+                // ═══ TOP 5 MENU TERLARIS ═══
+                if (topMenu.isNotEmpty()) {
+                    item {
+                        Card {
+                            Column(Modifier.padding(16.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.EmojiEvents, null, tint = BRAND)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Top 5 Menu (7 Hari)",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold)
                                 }
-                                Text(order.total.rupiah(),
-                                    fontWeight = FontWeight.Bold, color = BRAND)
+                                Spacer(Modifier.height(12.dp))
+                                topMenu.forEachIndexed { idx, m ->
+                                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically) {
+                                        Surface(
+                                            color = when (idx) {
+                                                0 -> Color(0xFFFFD54F)
+                                                1 -> Color(0xFFCFD8DC)
+                                                2 -> Color(0xFFFFAB91)
+                                                else -> MaterialTheme.colorScheme.surfaceVariant
+                                            },
+                                            shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                            Box(Modifier.size(28.dp),
+                                                contentAlignment = Alignment.Center) {
+                                                Text("${idx + 1}",
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF424242))
+                                            }
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(m.namaMenu, fontWeight = FontWeight.SemiBold,
+                                                style = MaterialTheme.typography.bodyMedium)
+                                            Text("${m.totalQty}x terjual",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        Text(m.totalOmzet.rupiah(),
+                                            fontWeight = FontWeight.Bold, color = BRAND,
+                                            style = MaterialTheme.typography.bodyMedium)
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+
+            // ═══ TRANSAKSI TERAKHIR ═══
+            item {
+                Spacer(Modifier.height(8.dp))
+                Text("Transaksi Terakhir", fontWeight = FontWeight.SemiBold)
+            }
+            if (recent.isEmpty()) {
+                item {
+                    Text("Belum ada transaksi hari ini",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            } else {
+                items(recent.take(20), key = { it.id }) { order ->
+                    Card(Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    order.timestamp.jamPendek() + " • " +
+                                    PaymentMethod.fromId(order.metodeBayar).label,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    if (order.memberNama.isNotBlank())
+                                        "⭐ ${order.memberNama}"
+                                    else if (order.nomorMeja.isNotBlank())
+                                        "Meja ${order.nomorMeja}"
+                                    else "Tanpa meja",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                            Text(order.total.rupiah(),
+                                fontWeight = FontWeight.Bold, color = BRAND)
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(24.dp)) }
         }
+    }
+}
+
+@Composable
+private fun BarChart7Hari(data: List<HariPenjualan>) {
+    if (data.isEmpty() || data.all { it.omzet == 0 }) {
+        Box(Modifier.fillMaxWidth().height(120.dp),
+            contentAlignment = Alignment.Center) {
+            Text("Belum ada data penjualan",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    val maxOmzet = data.maxOf { it.omzet }.coerceAtLeast(1)
+    val barColor = BRAND
+    val gridColor = MaterialTheme.colorScheme.outlineVariant
+    val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Column {
+        Canvas(Modifier.fillMaxWidth().height(160.dp)) {
+            val paddingLeft = 8f
+            val paddingBottom = 24f
+            val chartH = size.height - paddingBottom
+            val barW = (size.width - paddingLeft * 2) / (data.size * 2f - 1f)
+            val gap = barW
+
+            // Grid lines
+            for (i in 0..3) {
+                val y = chartH * i / 3f
+                drawLine(color = gridColor,
+                    start = Offset(0f, y),
+                    end = Offset(size.width, y),
+                    strokeWidth = 1f)
+            }
+
+            // Bars
+            data.forEachIndexed { idx, item ->
+                val x = paddingLeft + idx * (barW + gap)
+                val h = (item.omzet.toFloat() / maxOmzet) * (chartH - 8f)
+                val y = chartH - h
+                drawRoundRect(
+                    color = barColor,
+                    topLeft = Offset(x, y),
+                    size = Size(barW, h),
+                    cornerRadius = CornerRadius(6f, 6f)
+                )
+            }
+        }
+
+        // Label tanggal
+        Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween) {
+            data.forEach {
+                Text(it.label, style = MaterialTheme.typography.labelSmall,
+                    color = labelColor)
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text("Tertinggi: ${maxOmzet.rupiah()}",
+            style = MaterialTheme.typography.labelSmall,
+            color = labelColor)
     }
 }
 
