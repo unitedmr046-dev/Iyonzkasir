@@ -80,6 +80,9 @@ class KasirViewModel(
     var voucherError by mutableStateOf<String?>(null)
     var poinDipakai by mutableStateOf(0)
 
+    // Barcode feedback
+    var barcodeMessage by mutableStateOf<String?>(null)
+
     private val _cart = MutableStateFlow<Map<String, CartLine>>(emptyMap())
     val cart: StateFlow<List<CartLine>> = _cart.map { it.values.toList() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -127,7 +130,27 @@ class KasirViewModel(
         selectedMember = null
         voucherKode = ""; voucherAmount = 0; voucherError = null
         poinDipakai = 0
+        barcodeMessage = null
         clearCart()
+    }
+
+    /** Tambah dari barcode. */
+    fun addByBarcode(barcode: String, onFound: () -> Unit = {}) {
+        viewModelScope.launch {
+            barcodeMessage = null
+            val code = barcode.trim()
+            if (code.isBlank()) return@launch
+            val found = repo.getMenuByBarcode(code)
+            if (found == null) {
+                barcodeMessage = "Barcode '$code' nggak ditemukan"
+            } else if (!found.tersedia) {
+                barcodeMessage = "${found.nama} sedang tidak tersedia"
+            } else {
+                add(found)
+                barcodeMessage = "✓ ${found.nama} ditambahkan"
+                onFound()
+            }
+        }
     }
 
     fun loadOpenBill(orderId: Long) {
@@ -235,7 +258,7 @@ class KasirViewModel(
                 shiftId = shiftId,
                 memberId = selectedMember?.id ?: 0,
                 memberNama = selectedMember?.nama ?: "",
-                stokDipotong = false // open bill belum potong
+                stokDipotong = false
             )
             if (existingId != null) repo.updateOrderWithItems(order, items)
             else repo.simpanOrder(order, items)
@@ -264,6 +287,7 @@ class KasirViewModel(
             val poinDidapat = if (member != null)
                 LoyaltyConfig.hitungPoinDidapat(totalInt) else 0
             val potongStok = FeatureManager.isEnabled(FeatureKey.POTONG_STOK)
+            val antrianEnabled = FeatureManager.isEnabled(FeatureKey.LOW_STOCK_ALERT)
 
             val order = Order(
                 id = existingId ?: 0,
@@ -291,7 +315,6 @@ class KasirViewModel(
                 repo.updateOrderWithItems(order, items); existingId
             } else repo.simpanOrder(order, items)
 
-            // ═══ POTONG STOK ═══
             if (potongStok) {
                 try {
                     items.forEach { it ->
@@ -301,7 +324,6 @@ class KasirViewModel(
                 } catch (_: Exception) {}
             }
 
-            // ═══ CRM: poin & hutang ═══
             if (member != null) {
                 try {
                     if (poinDipakai > 0) crmRepo.redeemPoin(member.id, poinDipakai)
@@ -335,6 +357,7 @@ class MenuViewModel(
         repo.setTersedia(item.id, !item.tersedia)
     }
     suspend fun get(id: Long) = repo.getMenu(id)
+    suspend fun getByBarcode(barcode: String) = repo.getMenuByBarcode(barcode)
 }
 
 class OpenBillViewModel(repo: PosRepository) : ViewModel() {
@@ -354,7 +377,6 @@ class RiwayatViewModel(
             val order = repo.getOrder(id)
             val items = repo.itemsOf(id)
             repo.voidOrder(id, reason)
-            // Kembalikan stok kalau sebelumnya udah dipotong
             if (order?.stokDipotong == true) {
                 try {
                     items.forEach { it ->
@@ -414,11 +436,16 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
     private val _topMenu = MutableStateFlow<List<MenuTerlaris>>(emptyList())
     val topMenu: StateFlow<List<MenuTerlaris>> = _topMenu.asStateFlow()
 
+    private val _topKategori = MutableStateFlow<List<KategoriTerlaris>>(emptyList())
+    val topKategori: StateFlow<List<KategoriTerlaris>> = _topKategori.asStateFlow()
+
+    private val _metodeStat = MutableStateFlow<List<MetodeBayarStat>>(emptyList())
+    val metodeStat: StateFlow<List<MetodeBayarStat>> = _metodeStat.asStateFlow()
+
     init { loadExtras() }
 
     fun loadExtras() {
         viewModelScope.launch {
-            // Grafik 7 hari
             val cal = java.util.Calendar.getInstance()
             cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
             cal.set(java.util.Calendar.MINUTE, 0)
@@ -430,9 +457,7 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
             val orders = repo.ordersInRange(start, end)
             val fmt = java.text.SimpleDateFormat("dd/MM", java.util.Locale("id"))
             val map = mutableMapOf<Long, Pair<Int, Int>>()
-            for (i in 0..6) {
-                map[start + i * 24L * 60 * 60 * 1000] = 0 to 0
-            }
+            for (i in 0..6) map[start + i * 24L * 60 * 60 * 1000] = 0 to 0
             orders.forEach { o ->
                 val c = java.util.Calendar.getInstance()
                 c.timeInMillis = o.timestamp
@@ -447,13 +472,12 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
             _grafik.value = map.entries.sortedBy { it.key }.map { (day, pair) ->
                 HariPenjualan(
                     label = fmt.format(java.util.Date(day)),
-                    omzet = pair.second,
-                    transaksi = pair.first
+                    omzet = pair.second, transaksi = pair.first
                 )
             }
-
-            // Top menu dari 7 hari
             _topMenu.value = repo.menuTerlaris(start, end, 5)
+            _topKategori.value = repo.kategoriTerlaris(start, end, 5)
+            _metodeStat.value = repo.metodeBayarStat(start, end, 5)
         }
     }
 }
@@ -695,6 +719,10 @@ fun PosScreen(vm: KasirViewModel, onOpenKeranjang: () -> Unit, onBayar: () -> Un
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolean) {
+    val ctx = LocalContext.current
+    var showBarcode by remember { mutableStateOf(false) }
+    val barcodeEnabled = FeatureManager.isEnabled(FeatureKey.BARCODE)
+
     val menu by vm.menu.collectAsState()
     val kategoriList = remember(menu) { listOf(null) + menu.map { it.kategori }.distinct() }
     val filtered = remember(menu, vm.searchQuery, vm.kategoriFilter) {
@@ -717,6 +745,13 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                             else "Meja " + vm.nomorMeja,
                             style = MaterialTheme.typography.bodySmall
                         )
+                    }
+                },
+                actions = {
+                    if (barcodeEnabled) {
+                        IconButton(onClick = { showBarcode = true }) {
+                            Icon(Icons.Default.QrCodeScanner, null, tint = BRAND)
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -750,6 +785,31 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                     .height(52.dp)
             )
 
+            // Barcode feedback banner
+            vm.barcodeMessage?.let { msg ->
+                Surface(
+                    color = if (msg.startsWith("✓")) BRAND_LIGHT
+                    else MaterialTheme.colorScheme.errorContainer,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)
+                ) {
+                    Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (msg.startsWith("✓")) Icons.Default.CheckCircle
+                            else Icons.Default.Error,
+                            null,
+                            tint = if (msg.startsWith("✓")) SUCCESS else DANGER,
+                            modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text(msg, style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f))
+                        IconButton(onClick = { vm.barcodeMessage = null },
+                            modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+
             if (kategoriList.size > 1) {
                 LazyRow(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -782,6 +842,18 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                 }
             }
         }
+    }
+
+    if (showBarcode) {
+        BarcodeScannerDialog(
+            title = "Scan Menu",
+            hintText = "Scan barcode produk untuk tambah ke keranjang",
+            onResult = { code ->
+                vm.addByBarcode(code)
+                showBarcode = false
+            },
+            onDismiss = { showBarcode = false }
+        )
     }
 }
 
@@ -862,7 +934,6 @@ private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
                             color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
-                // Badge stok kalau track stok
                 if (m.trackStok && !stokHabis) {
                     Surface(
                         modifier = Modifier.padding(6.dp).align(Alignment.TopEnd),
@@ -1941,7 +2012,9 @@ private fun MenuRow(
                     }
                 }
                 Text(m.harga.rupiah(), color = BRAND)
-                Text(m.kategori, style = MaterialTheme.typography.labelSmall,
+                Text(
+                    m.kategori + if (m.barcode.isNotBlank()) " • 🔖" else "",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Switch(checked = m.tersedia, onCheckedChange = { onToggle() },
@@ -1969,14 +2042,18 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     var fotoUri by remember { mutableStateOf<String?>(null) }
     var originalPhotoUri by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
+    var barcode by remember { mutableStateOf("") }
 
-    // Stock fields
     var trackStok by remember { mutableStateOf(false) }
     var stokText by remember { mutableStateOf("0") }
     var stokMinimalText by remember { mutableStateOf("5") }
 
     var loaded by remember { mutableStateOf(menuId == null) }
     var showKategoriDropdown by remember { mutableStateOf(false) }
+    var showBarcodeScan by remember { mutableStateOf(false) }
+    var barcodeError by remember { mutableStateOf<String?>(null) }
+
+    val barcodeEnabled = FeatureManager.isEnabled(FeatureKey.BARCODE)
 
     LaunchedEffect(menuId) {
         if (menuId != null) {
@@ -1990,6 +2067,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 trackStok = it.trackStok
                 stokText = it.stok.toString()
                 stokMinimalText = it.stokMinimal.toString()
+                barcode = it.barcode
             }
             loaded = true
         }
@@ -2041,7 +2119,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     label = { Text("Nama menu") },
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
 
-                // ── KATEGORI DROPDOWN ──
+                // Kategori dropdown
                 Box {
                     OutlinedTextField(
                         value = kategoriNama,
@@ -2053,11 +2131,8 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                                 Icon(Icons.Default.ArrowDropDown, null)
                             }
                         },
-                        modifier = Modifier.fillMaxWidth().clickable {
-                            showKategoriDropdown = true
-                        }
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    // Transparan overlay biar tap langsung buka dropdown
                     Box(Modifier.matchParentSize().clickable {
                         showKategoriDropdown = true
                     })
@@ -2107,6 +2182,42 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
 
+                // ── BARCODE ──
+                if (barcodeEnabled) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        OutlinedTextField(
+                            value = barcode,
+                            onValueChange = {
+                                barcode = it.filter { c -> c.isLetterOrDigit() }
+                                    .take(50)
+                                barcodeError = null
+                            },
+                            label = { Text("Barcode / SKU (opsional)") },
+                            placeholder = { Text("Scan atau ketik manual") },
+                            singleLine = true,
+                            isError = barcodeError != null,
+                            supportingText = barcodeError?.let {
+                                { Text(it, color = DANGER) }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { showBarcodeScan = true },
+                            modifier = Modifier
+                                .size(52.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(BRAND)
+                        ) {
+                            Icon(Icons.Default.QrCodeScanner, null,
+                                tint = Color.White)
+                        }
+                    }
+                }
+
                 // ── TRACK STOK ──
                 Card(colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -2147,9 +2258,6 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                                     modifier = Modifier.weight(1f)
                                 )
                             }
-                            Text("Stok opname & riwayat bisa diakses di tab Stok",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
@@ -2181,7 +2289,8 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                             fotoUri = fotoUri, tersedia = tersedia,
                             trackStok = trackStok,
                             stok = stok,
-                            stokMinimal = stokMin
+                            stokMinimal = stokMin,
+                            barcode = barcode.trim()
                         )) { onBack() }
                     },
                     modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -2190,6 +2299,19 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 Spacer(Modifier.height(16.dp))
             }
         }
+    }
+
+    if (showBarcodeScan) {
+        BarcodeScannerDialog(
+            title = "Scan Barcode Produk",
+            hintText = "Arahkan kamera ke barcode produk",
+            onResult = { code ->
+                barcode = code
+                barcodeError = null
+                showBarcodeScan = false
+            },
+            onDismiss = { showBarcodeScan = false }
+        )
     }
 }
 
@@ -2220,8 +2342,7 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
 
     selected?.let { order ->
         OrderDetailDialog(
-            order = order,
-            vm = vm,
+            order = order, vm = vm,
             onDismiss = { selected = null }
         )
     }
@@ -2267,15 +2388,6 @@ private fun RiwayatCard(o: Order, onClick: () -> Unit) {
                     Text(o.total.rupiah(), fontWeight = FontWeight.Bold,
                         color = if (o.status == OrderStatus.PAID.id) BRAND
                         else MaterialTheme.colorScheme.onSurfaceVariant)
-                    val extras = buildString {
-                        if (o.diskonAmount > 0) append("Disc ${o.diskonAmount.rupiah()} ")
-                        if (o.voucherAmount > 0) append("Vcr ${o.voucherAmount.rupiah()} ")
-                        if (o.pajakAmount > 0) append("PPN ${o.pajakAmount.rupiah()}")
-                    }.trim()
-                    if (extras.isNotBlank()) {
-                        Text(extras, style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
                 }
             }
         }
@@ -2342,37 +2454,29 @@ private fun OrderDetailDialog(
                     }
                 }
                 HorizontalDivider(Modifier.padding(vertical = 6.dp))
-                if (order.subtotal > 0) {
-                    Row {
-                        Text("Subtotal", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall)
-                        Text(order.subtotal.rupiah(),
-                            style = MaterialTheme.typography.bodySmall)
-                    }
+                if (order.subtotal > 0) Row {
+                    Text("Subtotal", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall)
+                    Text(order.subtotal.rupiah(),
+                        style = MaterialTheme.typography.bodySmall)
                 }
-                if (order.diskonAmount > 0) {
-                    Row {
-                        Text("Diskon", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall, color = DANGER)
-                        Text("- ${order.diskonAmount.rupiah()}",
-                            style = MaterialTheme.typography.bodySmall, color = DANGER)
-                    }
+                if (order.diskonAmount > 0) Row {
+                    Text("Diskon", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall, color = DANGER)
+                    Text("- ${order.diskonAmount.rupiah()}",
+                        style = MaterialTheme.typography.bodySmall, color = DANGER)
                 }
-                if (order.voucherAmount > 0) {
-                    Row {
-                        Text("Voucher ${order.voucherKode}", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall, color = DANGER)
-                        Text("- ${order.voucherAmount.rupiah()}",
-                            style = MaterialTheme.typography.bodySmall, color = DANGER)
-                    }
+                if (order.voucherAmount > 0) Row {
+                    Text("Voucher", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall, color = DANGER)
+                    Text("- ${order.voucherAmount.rupiah()}",
+                        style = MaterialTheme.typography.bodySmall, color = DANGER)
                 }
-                if (order.pajakAmount > 0) {
-                    Row {
-                        Text("PPN ${order.pajakPersen}%", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall)
-                        Text(order.pajakAmount.rupiah(),
-                            style = MaterialTheme.typography.bodySmall)
-                    }
+                if (order.pajakAmount > 0) Row {
+                    Text("PPN ${order.pajakPersen}%", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall)
+                    Text(order.pajakAmount.rupiah(),
+                        style = MaterialTheme.typography.bodySmall)
                 }
                 Row {
                     Text("Total", Modifier.weight(1f), fontWeight = FontWeight.Bold)
@@ -2385,34 +2489,20 @@ private fun OrderDetailDialog(
                     Text(PaymentMethod.fromId(order.metodeBayar).label,
                         style = MaterialTheme.typography.bodySmall)
                 }
-                if (order.memberNama.isNotBlank()) {
-                    Row {
-                        Text("Member", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall)
-                        Text("⭐ ${order.memberNama} (+${order.poinDidapat} poin)",
-                            style = MaterialTheme.typography.bodySmall)
-                    }
+                if (order.memberNama.isNotBlank()) Row {
+                    Text("Member", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("⭐ ${order.memberNama} (+${order.poinDidapat} poin)",
+                        style = MaterialTheme.typography.bodySmall)
                 }
-                if (order.kasirNama.isNotBlank()) {
-                    Row {
-                        Text("Kasir", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall)
-                        Text(order.kasirNama,
-                            style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                if (order.stokDipotong) {
-                    Row {
-                        Text("Stok", Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodySmall)
-                        Text("✓ sudah dipotong",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = SUCCESS)
-                    }
+                if (order.kasirNama.isNotBlank()) Row {
+                    Text("Kasir", Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall)
+                    Text(order.kasirNama,
+                        style = MaterialTheme.typography.bodySmall)
                 }
 
                 Spacer(Modifier.height(12.dp))
-
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.fillMaxWidth()) {
                     if (printerEnabled) {
@@ -2607,6 +2697,8 @@ fun DashboardScreen(vm: DashboardViewModel) {
     val recent by vm.transaksiTerakhir.collectAsState()
     val grafik by vm.grafik.collectAsState()
     val topMenu by vm.topMenu.collectAsState()
+    val topKategori by vm.topKategori.collectAsState()
+    val metodeStat by vm.metodeStat.collectAsState()
 
     Scaffold(topBar = { TopAppBar(title = { Text("Dashboard") }) }) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(),
@@ -2638,7 +2730,6 @@ fun DashboardScreen(vm: DashboardViewModel) {
                 }
             }
 
-            // ═══ GRAFIK 7 HARI ═══
             if (FeatureManager.isEnabled(FeatureKey.GRAFIK)) {
                 item {
                     Card {
@@ -2656,58 +2747,29 @@ fun DashboardScreen(vm: DashboardViewModel) {
                     }
                 }
 
-                // ═══ TOP 5 MENU TERLARIS ═══
                 if (topMenu.isNotEmpty()) {
-                    item {
-                        Card {
-                            Column(Modifier.padding(16.dp)) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.EmojiEvents, null, tint = BRAND)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Top 5 Menu (7 Hari)",
-                                        style = MaterialTheme.typography.titleMedium,
-                                        fontWeight = FontWeight.Bold)
-                                }
-                                Spacer(Modifier.height(12.dp))
-                                topMenu.forEachIndexed { idx, m ->
-                                    Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically) {
-                                        Surface(
-                                            color = when (idx) {
-                                                0 -> Color(0xFFFFD54F)
-                                                1 -> Color(0xFFCFD8DC)
-                                                2 -> Color(0xFFFFAB91)
-                                                else -> MaterialTheme.colorScheme.surfaceVariant
-                                            },
-                                            shape = RoundedCornerShape(6.dp)
-                                        ) {
-                                            Box(Modifier.size(28.dp),
-                                                contentAlignment = Alignment.Center) {
-                                                Text("${idx + 1}",
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF424242))
-                                            }
-                                        }
-                                        Spacer(Modifier.width(12.dp))
-                                        Column(Modifier.weight(1f)) {
-                                            Text(m.namaMenu, fontWeight = FontWeight.SemiBold,
-                                                style = MaterialTheme.typography.bodyMedium)
-                                            Text("${m.totalQty}x terjual",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                        Text(m.totalOmzet.rupiah(),
-                                            fontWeight = FontWeight.Bold, color = BRAND,
-                                            style = MaterialTheme.typography.bodyMedium)
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    item { TopList("🏆 Top 5 Menu", topMenu.map {
+                        Triple(it.namaMenu, "${it.totalQty}x", it.totalOmzet)
+                    }) }
+                }
+
+                if (topKategori.isNotEmpty()) {
+                    item { TopList("📂 Top Kategori", topKategori.map {
+                        Triple(it.kategori, "${it.totalQty}x", it.totalOmzet)
+                    }) }
+                }
+
+                if (metodeStat.isNotEmpty()) {
+                    item { TopList("💳 Metode Bayar", metodeStat.map {
+                        Triple(
+                            PaymentMethod.fromId(it.metode).label,
+                            "${it.totalTransaksi}x",
+                            it.totalOmzet
+                        )
+                    }) }
                 }
             }
 
-            // ═══ TRANSAKSI TERAKHIR ═══
             item {
                 Spacer(Modifier.height(8.dp))
                 Text("Transaksi Terakhir", fontWeight = FontWeight.SemiBold)
@@ -2751,6 +2813,48 @@ fun DashboardScreen(vm: DashboardViewModel) {
 }
 
 @Composable
+private fun TopList(title: String, items: List<Triple<String, String, Int>>) {
+    Card {
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(12.dp))
+            items.forEachIndexed { idx, (nama, qty, omzet) ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = when (idx) {
+                            0 -> Color(0xFFFFD54F)
+                            1 -> Color(0xFFCFD8DC)
+                            2 -> Color(0xFFFFAB91)
+                            else -> MaterialTheme.colorScheme.surfaceVariant
+                        },
+                        shape = RoundedCornerShape(6.dp)
+                    ) {
+                        Box(Modifier.size(28.dp),
+                            contentAlignment = Alignment.Center) {
+                            Text("${idx + 1}", fontWeight = FontWeight.Bold,
+                                color = Color(0xFF424242))
+                        }
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(nama, fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.bodyMedium)
+                        Text(qty,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Text(omzet.rupiah(),
+                        fontWeight = FontWeight.Bold, color = BRAND,
+                        style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun BarChart7Hari(data: List<HariPenjualan>) {
     if (data.isEmpty() || data.all { it.omzet == 0 }) {
         Box(Modifier.fillMaxWidth().height(120.dp),
@@ -2773,8 +2877,6 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
             val chartH = size.height - paddingBottom
             val barW = (size.width - paddingLeft * 2) / (data.size * 2f - 1f)
             val gap = barW
-
-            // Grid lines
             for (i in 0..3) {
                 val y = chartH * i / 3f
                 drawLine(color = gridColor,
@@ -2782,8 +2884,6 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
                     end = Offset(size.width, y),
                     strokeWidth = 1f)
             }
-
-            // Bars
             data.forEachIndexed { idx, item ->
                 val x = paddingLeft + idx * (barW + gap)
                 val h = (item.omzet.toFloat() / maxOmzet) * (chartH - 8f)
@@ -2796,8 +2896,6 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
                 )
             }
         }
-
-        // Label tanggal
         Row(Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween) {
             data.forEach {
@@ -2805,7 +2903,6 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
                     color = labelColor)
             }
         }
-
         Spacer(Modifier.height(8.dp))
         Text("Tertinggi: ${maxOmzet.rupiah()}",
             style = MaterialTheme.typography.labelSmall,
