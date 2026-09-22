@@ -87,7 +87,7 @@ object Routes {
     const val TAB_DASHBOARD = "tab_dashboard"
     const val TAB_SETTINGS = "tab_settings"
 
-    // Akses via Home shortcut / Settings
+    // Akses via Home shortcut
     const val TAB_MENU = "tab_menu"
     const val TAB_OPEN_BILL = "tab_openbill"
     const val TAB_RIWAYAT = "tab_riwayat"
@@ -107,6 +107,8 @@ object Routes {
     const val CRM = "crm"
     const val INVENTARIS = "inventaris"
     const val KATEGORI = "kategori"
+    const val KEUANGAN = "keuangan"
+    const val BARCODE_INFO = "barcode_info"
     const val TENTANG = "tentang"
 }
 
@@ -180,6 +182,8 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.CRM) { CrmRoute(app, nav) }
         composable(Routes.INVENTARIS) { InventarisRoute(app, nav) }
         composable(Routes.KATEGORI) { KategoriRoute(app, nav) }
+        composable(Routes.KEUANGAN) { KeuanganRoute(app, nav) }
+        composable(Routes.BARCODE_INFO) { BarcodeInfoRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
@@ -198,7 +202,6 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
     val innerNav = rememberNavController()
     val enabledFeatures by FeatureManager.enabled.collectAsState()
 
-    // 5 Tab Utama
     val allTabs = listOf(
         NavTab(Routes.TAB_HOME, "Home", Icons.Default.Home),
         NavTab(Routes.TAB_POS, "Kasir", Icons.Default.PointOfSale,
@@ -254,7 +257,7 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
             composable(Routes.TAB_DASHBOARD) { DashboardRoute(app) }
             composable(Routes.TAB_SETTINGS) { SettingsRoute(app, nav) }
 
-            // Akses via Home shortcut (tetap ada di inner nav)
+            // Akses via Home shortcut
             composable(Routes.TAB_MENU) { MenuRoute(app, nav, innerNav) }
             composable(Routes.TAB_OPEN_BILL) { OpenBillRoute(app, nav, innerNav) }
             composable(Routes.TAB_RIWAYAT) { RiwayatRoute(app) }
