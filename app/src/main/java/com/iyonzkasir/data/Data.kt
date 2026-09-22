@@ -81,7 +81,8 @@ data class MenuItem(
     val tersedia: Boolean = true,
     val trackStok: Boolean = false,
     val stok: Int = 0,
-    val stokMinimal: Int = 5
+    val stokMinimal: Int = 5,
+    val barcode: String = ""
 )
 
 @Entity(tableName = "stock_movements")
@@ -128,7 +129,8 @@ data class Order(
     val memberId: Long = 0,
     val memberNama: String = "",
     val poinDidapat: Int = 0,
-    val stokDipotong: Boolean = false
+    val stokDipotong: Boolean = false,
+    val nomorAntrian: Int = 0
 )
 
 @Entity(tableName = "order_items")
@@ -231,6 +233,14 @@ data class MenuTerlaris(
     val totalQty: Int, val totalOmzet: Int
 )
 
+data class KategoriTerlaris(
+    val kategori: String, val totalQty: Int, val totalOmzet: Int
+)
+
+data class MetodeBayarStat(
+    val metode: String, val totalTransaksi: Int, val totalOmzet: Int
+)
+
 // ═══════ DAOs ═══════
 
 @Dao
@@ -325,6 +335,8 @@ interface MenuDao {
     fun observeTrackStok(): Flow<List<MenuItem>>
     @Query("SELECT * FROM menu_items WHERE id = :id")
     suspend fun getById(id: Long): MenuItem?
+    @Query("SELECT * FROM menu_items WHERE barcode = :barcode AND barcode != '' LIMIT 1")
+    suspend fun getByBarcode(barcode: String): MenuItem?
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(item: MenuItem): Long
     @Update
@@ -397,6 +409,8 @@ interface OrderDao {
     suspend fun updateStatus(id: Long, status: String, reason: String)
     @Query("UPDATE orders SET stokDipotong = :v WHERE id = :id")
     suspend fun setStokDipotong(id: Long, v: Boolean)
+    @Query("SELECT COALESCE(MAX(nomorAntrian), 0) FROM orders WHERE timestamp >= :start")
+    suspend fun maxAntrianSince(start: Long): Int
 
     @Query("SELECT COUNT(*) FROM orders WHERE shiftId = :shiftId AND status = 'PAID'")
     suspend fun countByShift(shiftId: Long): Int
@@ -435,6 +449,32 @@ interface OrderDao {
         LIMIT :limit
     """)
     suspend fun menuTerlaris(start: Long, end: Long, limit: Int = 5): List<MenuTerlaris>
+
+    @Query("""
+        SELECT COALESCE(m.kategori, 'Umum') AS kategori,
+               SUM(oi.qty) AS totalQty,
+               SUM(oi.hargaSatuan * oi.qty) AS totalOmzet
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.orderId
+        LEFT JOIN menu_items m ON m.id = oi.menuId
+        WHERE o.status = 'PAID' AND o.timestamp >= :start AND o.timestamp <= :end
+        GROUP BY m.kategori
+        ORDER BY SUM(oi.qty) DESC
+        LIMIT :limit
+    """)
+    suspend fun kategoriTerlaris(start: Long, end: Long, limit: Int = 5): List<KategoriTerlaris>
+
+    @Query("""
+        SELECT metodeBayar AS metode,
+               COUNT(*) AS totalTransaksi,
+               COALESCE(SUM(total), 0) AS totalOmzet
+        FROM orders
+        WHERE status = 'PAID' AND timestamp >= :start AND timestamp <= :end
+        GROUP BY metodeBayar
+        ORDER BY COUNT(*) DESC
+        LIMIT :limit
+    """)
+    suspend fun metodeBayarStat(start: Long, end: Long, limit: Int = 5): List<MetodeBayarStat>
 
     @Query("SELECT * FROM orders WHERE status = 'PAID' AND timestamp >= :start AND timestamp <= :end ORDER BY timestamp ASC")
     suspend fun ordersInRange(start: Long, end: Long): List<Order>
@@ -673,6 +713,15 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Barcode field di menu
+        db.execSQL("ALTER TABLE menu_items ADD COLUMN barcode TEXT NOT NULL DEFAULT ''")
+        // Nomor antrian di order
+        db.execSQL("ALTER TABLE orders ADD COLUMN nomorAntrian INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
 // ═══════ DATABASE ═══════
 
 @Database(
@@ -682,7 +731,7 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
         StockMovement::class, Order::class, OrderItem::class, Shift::class,
         Member::class, Voucher::class, MemberTransaction::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -710,7 +759,8 @@ abstract class AppDatabase : RoomDatabase() {
                     "iyonzkasir.db"
                 ).addMigrations(
                     MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
-                    MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8
+                    MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
+                    MIGRATION_8_9
                 ).build().also { INSTANCE = it }
             }
     }
@@ -780,6 +830,7 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getThemeMode() = ThemeMode.fromId(get(KEY_TEMA_MODE, "system"))
     suspend fun setThemeMode(m: ThemeMode) = set(KEY_TEMA_MODE, m.id)
 
+    // Printer
     suspend fun getPrinterMac() = get(KEY_PRINTER_MAC, "")
     suspend fun setPrinterMac(mac: String) = set(KEY_PRINTER_MAC, mac)
     suspend fun getPrinterNama() = get(KEY_PRINTER_NAMA, "")
@@ -789,11 +840,34 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun isAutoPrint() = get(KEY_AUTO_PRINT, "0") == "1"
     suspend fun setAutoPrint(v: Boolean) = set(KEY_AUTO_PRINT, if (v) "1" else "0")
 
+    // Backup
     suspend fun getLastBackupTimestamp() =
         get(KEY_LAST_BACKUP, "0").toLongOrNull() ?: 0L
     suspend fun setLastBackupTimestamp(ts: Long) = set(KEY_LAST_BACKUP, ts.toString())
     suspend fun getLastBackupName() = get(KEY_LAST_BACKUP_NAME, "")
     suspend fun setLastBackupName(name: String) = set(KEY_LAST_BACKUP_NAME, name)
+
+    // Pajak default
+    suspend fun getPajakDefault() = get(KEY_PAJAK_DEFAULT, "0").toIntOrNull() ?: 0
+    suspend fun setPajakDefault(v: Int) = set(KEY_PAJAK_DEFAULT, v.toString())
+
+    // Suara
+    suspend fun isSoundEnabled() = get(KEY_SOUND_ENABLED, "1") == "1"
+    suspend fun setSoundEnabled(v: Boolean) = set(KEY_SOUND_ENABLED, if (v) "1" else "0")
+
+    // Metode bayar aktif (comma separated, default semua)
+    suspend fun getMetodeAktif(): Set<String> {
+        val raw = get(KEY_METODE_AKTIF, "CASH,QRIS,DEBIT,EWALLET,TRANSFER,HUTANG")
+        return raw.split(",").filter { it.isNotBlank() }.toSet()
+    }
+    suspend fun setMetodeAktif(metode: Set<String>) =
+        set(KEY_METODE_AKTIF, metode.joinToString(","))
+
+    // Nomor antrian
+    suspend fun isAntrianEnabled() = get(KEY_ANTRIAN_ENABLED, "0") == "1"
+    suspend fun setAntrianEnabled(v: Boolean) = set(KEY_ANTRIAN_ENABLED, if (v) "1" else "0")
+    suspend fun getAntrianPrefix() = get(KEY_ANTRIAN_PREFIX, "")
+    suspend fun setAntrianPrefix(v: String) = set(KEY_ANTRIAN_PREFIX, v)
 
     companion object {
         const val KEY_NAMA_TOKO = "toko_nama"
@@ -810,6 +884,11 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_AUTO_PRINT = "auto_print"
         const val KEY_LAST_BACKUP = "last_backup_ts"
         const val KEY_LAST_BACKUP_NAME = "last_backup_name"
+        const val KEY_PAJAK_DEFAULT = "pajak_default_persen"
+        const val KEY_SOUND_ENABLED = "sound_enabled"
+        const val KEY_METODE_AKTIF = "metode_aktif"
+        const val KEY_ANTRIAN_ENABLED = "antrian_enabled"
+        const val KEY_ANTRIAN_PREFIX = "antrian_prefix"
     }
 }
 
@@ -854,7 +933,6 @@ class KategoriRepository(private val dao: KategoriDao) {
 
     suspend fun save(k: Kategori): Long {
         val id = if (k.id == 0L) {
-            // kategori baru — taruh di urutan paling akhir
             val next = dao.maxUrutan() + 1
             dao.upsert(k.copy(urutan = next))
         } else {
@@ -878,11 +956,8 @@ class StockRepository(
 
     fun observeMovementsForMenu(menuId: Long) = stockDao.observeForMenu(menuId)
 
-    /** Sesuaikan stok manual (opname / koreksi). */
     suspend fun adjustStock(
-        menuId: Long,
-        newStok: Int,
-        keterangan: String = "",
+        menuId: Long, newStok: Int, keterangan: String = "",
         tipe: StockMovementType = StockMovementType.OPNAME
     ): Boolean {
         val menu = menuDao.getById(menuId) ?: return false
@@ -892,23 +967,14 @@ class StockRepository(
         menuDao.updateStok(menuId, sesudah)
         val u = Session.current
         stockDao.insert(StockMovement(
-            menuId = menuId,
-            namaMenu = menu.nama,
-            tipe = tipe.id,
-            qty = sesudah - sebelum,
-            stokSebelum = sebelum,
-            stokSesudah = sesudah,
-            keterangan = keterangan,
-            userId = u?.id ?: "",
-            userName = u?.nama ?: ""
+            menuId = menuId, namaMenu = menu.nama, tipe = tipe.id,
+            qty = sesudah - sebelum, stokSebelum = sebelum, stokSesudah = sesudah,
+            keterangan = keterangan, userId = u?.id ?: "", userName = u?.nama ?: ""
         ))
         return true
     }
 
-    /** Tambah stok (restock/pemasukan). */
-    suspend fun tambahStok(
-        menuId: Long, jumlah: Int, keterangan: String = ""
-    ): Boolean {
+    suspend fun tambahStok(menuId: Long, jumlah: Int, keterangan: String = ""): Boolean {
         if (jumlah <= 0) return false
         val menu = menuDao.getById(menuId) ?: return false
         if (!menu.trackStok) return false
@@ -917,23 +983,14 @@ class StockRepository(
         menuDao.updateStok(menuId, sesudah)
         val u = Session.current
         stockDao.insert(StockMovement(
-            menuId = menuId,
-            namaMenu = menu.nama,
-            tipe = StockMovementType.IN.id,
-            qty = jumlah,
-            stokSebelum = sebelum,
-            stokSesudah = sesudah,
-            keterangan = keterangan,
-            userId = u?.id ?: "",
-            userName = u?.nama ?: ""
+            menuId = menuId, namaMenu = menu.nama, tipe = StockMovementType.IN.id,
+            qty = jumlah, stokSebelum = sebelum, stokSesudah = sesudah,
+            keterangan = keterangan, userId = u?.id ?: "", userName = u?.nama ?: ""
         ))
         return true
     }
 
-    /** Potong stok karena penjualan. */
-    suspend fun potongStokPenjualan(
-        menuId: Long, qty: Int, orderId: Long
-    ): Boolean {
+    suspend fun potongStokPenjualan(menuId: Long, qty: Int, orderId: Long): Boolean {
         if (qty <= 0) return false
         val menu = menuDao.getById(menuId) ?: return false
         if (!menu.trackStok) return false
@@ -942,21 +999,14 @@ class StockRepository(
         menuDao.updateStok(menuId, sesudah)
         val u = Session.current
         stockDao.insert(StockMovement(
-            menuId = menuId,
-            namaMenu = menu.nama,
-            tipe = StockMovementType.SALE.id,
-            qty = -qty,
-            stokSebelum = sebelum,
-            stokSesudah = sesudah,
+            menuId = menuId, namaMenu = menu.nama, tipe = StockMovementType.SALE.id,
+            qty = -qty, stokSebelum = sebelum, stokSesudah = sesudah,
             keterangan = "Penjualan order #$orderId",
-            userId = u?.id ?: "",
-            userName = u?.nama ?: "",
-            orderId = orderId
+            userId = u?.id ?: "", userName = u?.nama ?: "", orderId = orderId
         ))
         return true
     }
 
-    /** Kembalikan stok (saat void/refund). */
     suspend fun kembalikanStok(
         menuId: Long, qty: Int, orderId: Long, keterangan: String = "Retur void"
     ): Boolean {
@@ -968,16 +1018,10 @@ class StockRepository(
         menuDao.updateStok(menuId, sesudah)
         val u = Session.current
         stockDao.insert(StockMovement(
-            menuId = menuId,
-            namaMenu = menu.nama,
-            tipe = StockMovementType.VOID_RETURN.id,
-            qty = qty,
-            stokSebelum = sebelum,
-            stokSesudah = sesudah,
-            keterangan = keterangan,
-            userId = u?.id ?: "",
-            userName = u?.nama ?: "",
-            orderId = orderId
+            menuId = menuId, namaMenu = menu.nama, tipe = StockMovementType.VOID_RETURN.id,
+            qty = qty, stokSebelum = sebelum, stokSesudah = sesudah,
+            keterangan = keterangan, userId = u?.id ?: "",
+            userName = u?.nama ?: "", orderId = orderId
         ))
         return true
     }
@@ -996,6 +1040,7 @@ class PosRepository(
     suspend fun deleteMenu(item: MenuItem) = menuDao.delete(item)
     suspend fun setTersedia(id: Long, v: Boolean) = menuDao.setTersedia(id, v)
     suspend fun getMenu(id: Long) = menuDao.getById(id)
+    suspend fun getMenuByBarcode(barcode: String) = menuDao.getByBarcode(barcode)
 
     suspend fun simpanOrder(order: Order, items: List<OrderItem>) =
         orderDao.simpanOrder(order, items)
@@ -1003,9 +1048,18 @@ class PosRepository(
         orderDao.updateOrderWithItems(order, items)
     suspend fun getOrder(id: Long) = orderDao.getOrder(id)
     suspend fun itemsOf(orderId: Long) = orderDao.itemsOf(orderId)
-
     suspend fun markStokDipotong(orderId: Long, v: Boolean) =
         orderDao.setStokDipotong(orderId, v)
+
+    suspend fun nextNomorAntrian(): Int {
+        val cal = java.util.Calendar.getInstance()
+        cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
+        cal.set(java.util.Calendar.MINUTE, 0)
+        cal.set(java.util.Calendar.SECOND, 0)
+        cal.set(java.util.Calendar.MILLISECOND, 0)
+        val startOfDay = cal.timeInMillis
+        return orderDao.maxAntrianSince(startOfDay) + 1
+    }
 
     suspend fun voidOrder(id: Long, reason: String) =
         orderDao.updateStatus(id, OrderStatus.VOID.id, reason)
@@ -1023,6 +1077,10 @@ class PosRepository(
     suspend fun labaPerProduk(start: Long, end: Long) = orderDao.labaPerProduk(start, end)
     suspend fun menuTerlaris(start: Long, end: Long, limit: Int = 5) =
         orderDao.menuTerlaris(start, end, limit)
+    suspend fun kategoriTerlaris(start: Long, end: Long, limit: Int = 5) =
+        orderDao.kategoriTerlaris(start, end, limit)
+    suspend fun metodeBayarStat(start: Long, end: Long, limit: Int = 5) =
+        orderDao.metodeBayarStat(start, end, limit)
     suspend fun ordersInRange(start: Long, end: Long) = orderDao.ordersInRange(start, end)
 }
 
