@@ -4,9 +4,13 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,15 +37,11 @@ import com.iyonzkasir.data.*
 import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
-// SETTINGS ITEM DATA
+// SETTINGS ITEM
 // ═══════════════════════════════════════════════════════════
 private data class SettingItem(
-    val key: String,
-    val title: String,
-    val subtitle: String,
-    val icon: ImageVector,
-    val color: Color,
-    val onClick: () -> Unit
+    val key: String, val title: String, val subtitle: String,
+    val icon: ImageVector, val color: Color, val onClick: () -> Unit
 )
 
 // ═══════════════════════════════════════════════════════════
@@ -62,8 +62,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     LaunchedEffect(Unit) {
         namaToko = app.settingRepo.getNamaToko()
         businessType = app.settingRepo.getBusinessType()
-    }
-    LaunchedEffect(Unit) {
         app.crmRepo.memberCount.collect { memberCount = it }
     }
     LaunchedEffect(Unit) {
@@ -71,126 +69,133 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     }
 
     val crmEnabled = FeatureKey.MEMBER in enabled ||
-            FeatureKey.VOUCHER in enabled ||
-            FeatureKey.HUTANG_PELANGGAN in enabled
+            FeatureKey.VOUCHER in enabled || FeatureKey.HUTANG_PELANGGAN in enabled
     val stockEnabled = FeatureKey.LOW_STOCK_ALERT in enabled ||
-            FeatureKey.POTONG_STOK in enabled ||
-            FeatureKey.STOCK_OPNAME in enabled
+            FeatureKey.POTONG_STOK in enabled || FeatureKey.STOCK_OPNAME in enabled
     val kategoriEnabled = FeatureKey.KATEGORI_MGMT in enabled
     val barcodeEnabled = FeatureKey.BARCODE in enabled
+    val pengeluaranEnabled = FeatureKey.PENGELUARAN in enabled
+    val antrianEnabled = FeatureKey.NOMOR_ANTRIAN in enabled
+    val printerEnabled = FeatureKey.PRINTER_BT in enabled
 
     val groups = buildList {
         // TOKO
-        val tokoItems = mutableListOf<SettingItem>()
-        tokoItems.add(SettingItem(
-            "profil", "Profil Toko",
+        val toko = mutableListOf<SettingItem>()
+        toko.add(SettingItem("profil", "Profil Toko",
             "Nama, alamat, telepon, footer struk",
-            Icons.Default.Store, Color(0xFFFF6B35)
+            Icons.Default.Store, Color(0xFFFF6B35")
         ) { if (Session.can(PermissionKey.PROFIL_TOKO)) nav.navigate(Routes.PROFIL_TOKO) })
         if (kategoriEnabled && Session.can(PermissionKey.KELOLA_KATEGORI)) {
-            tokoItems.add(SettingItem(
-                "kategori", "Kelola Kategori",
+            toko.add(SettingItem("kategori", "Kelola Kategori",
                 "Tambah/edit kategori & warna",
-                Icons.Default.Category, Color(0xFF8E24AA)
+                Icons.Default.Category, Color(0xFF8E24AA")
             ) { nav.navigate(Routes.KATEGORI) })
         }
         if (Session.can(PermissionKey.KELOLA_USER)) {
-            tokoItems.add(SettingItem(
-                "user", "Kelola Pengguna",
+            toko.add(SettingItem("user", "Kelola Pengguna",
                 "Tambah user & atur izin",
-                Icons.Default.ManageAccounts, Color(0xFF1E88E5)
+                Icons.Default.ManageAccounts, Color(0xFF1E88E5")
             ) { nav.navigate(Routes.KELOLA_USER) })
         }
-        if (tokoItems.isNotEmpty()) add("TOKO" to tokoItems)
+        if (toko.isNotEmpty()) add("TOKO" to toko)
 
         // TRANSAKSI
-        val trxItems = mutableListOf<SettingItem>()
-        trxItems.add(SettingItem(
-            "pajak", "Keuangan & Pajak",
-            "PPN default, metode bayar, profit",
-            Icons.Default.Payments, Color(0xFF43A047)
+        val trx = mutableListOf<SettingItem>()
+        trx.add(SettingItem("pajak", "Keuangan & Pajak",
+            "PPN default, metode bayar, suara",
+            Icons.Default.Payments, Color(0xFF43A047")
         ) { nav.navigate(Routes.KEUANGAN) })
+        if (pengeluaranEnabled && Session.can(PermissionKey.KELOLA_PENGELUARAN)) {
+            trx.add(SettingItem("pengeluaran", "Pengeluaran",
+                "Catat biaya operasional harian",
+                Icons.Default.AccountBalanceWallet, Color(0xFFE53935")
+            ) { nav.navigate(Routes.PENGELUARAN) })
+        }
+        if (antrianEnabled) {
+            trx.add(SettingItem("antrian", "Nomor Antrian",
+                "Aktifkan & atur prefix antrian",
+                Icons.Default.ConfirmationNumber, Color(0xFFD81B60")
+            ) { nav.navigate(Routes.ANTRIAN) })
+        }
         if (stockEnabled && Session.can(PermissionKey.LIHAT_STOK)) {
-            trxItems.add(SettingItem(
-                "stok", "Kelola Stok",
+            trx.add(SettingItem("stok", "Kelola Stok",
                 if (lowStockCount > 0) "⚠️ $lowStockCount menu stok menipis"
                 else "Stok, opname, riwayat pergerakan",
-                Icons.Default.Inventory, Color(0xFF00897B)
+                Icons.Default.Inventory, Color(0xFF00897B")
             ) { nav.navigate(Routes.INVENTARIS) })
         }
         if (Session.can(PermissionKey.KELOLA_FITUR)) {
-            trxItems.add(SettingItem(
-                "fitur", "Kelola Fitur",
-                "Aktifkan / matikan fitur sesuai kebutuhan",
-                Icons.Default.Tune, Color(0xFFFB8C00)
+            trx.add(SettingItem("fitur", "Kelola Fitur",
+                "Aktifkan / matikan fitur",
+                Icons.Default.Tune, Color(0xFFFB8C00")
             ) { nav.navigate(Routes.FEATURE_TOGGLE) })
         }
         if (crmEnabled) {
-            trxItems.add(SettingItem(
-                "crm", "Member & Voucher",
+            trx.add(SettingItem("crm", "Member & Voucher",
                 if (memberCount > 0) "$memberCount member terdaftar"
                 else "Kelola member, poin & voucher",
-                Icons.Default.People, Color(0xFF6D4C41)
+                Icons.Default.People, Color(0xFF6D4C41")
             ) { nav.navigate(Routes.CRM) })
         }
-        add("TRANSAKSI" to trxItems)
+        add("TRANSAKSI" to trx)
 
         // OUTPUT
-        val outItems = mutableListOf<SettingItem>()
-        outItems.add(SettingItem(
-            "laporan", "Laporan & Laba",
+        val out = mutableListOf<SettingItem>()
+        out.add(SettingItem("laporan", "Laporan & Laba",
             "Laporan lengkap, grafik, export CSV",
-            Icons.Default.Analytics, Color(0xFF3949AB)
+            Icons.Default.Analytics, Color(0xFF3949AB")
         ) { if (Session.can(PermissionKey.LIHAT_LAPORAN)) nav.navigate(Routes.LAPORAN) })
-        if (FeatureManager.isEnabled(FeatureKey.PRINTER_BT)) {
-            outItems.add(SettingItem(
-                "printer", "Printer & Struk",
-                "Sambungkan printer, ukuran kertas, format struk",
-                Icons.Default.Print, Color(0xFFD81B60)
+        if (printerEnabled) {
+            out.add(SettingItem("printer", "Printer & Struk",
+                "Sambungkan printer, ukuran kertas",
+                Icons.Default.Print, Color(0xFF546E7A")
             ) { nav.navigate(Routes.PRINTER) })
+            out.add(SettingItem("template_struk", "Template Struk",
+                "Atur field apa saja di struk",
+                Icons.Default.Receipt, Color(0xFF9C27B0")
+            ) { nav.navigate(Routes.TEMPLATE_STRUK) })
         }
         if (barcodeEnabled) {
-            outItems.add(SettingItem(
-                "barcode", "Barcode Scanner",
+            out.add(SettingItem("barcode", "Barcode Scanner",
                 "Scan dari kamera / galeri",
-                Icons.Default.QrCodeScanner, Color(0xFFE53935)
+                Icons.Default.QrCodeScanner, Color(0xFF607D8B")
             ) { nav.navigate(Routes.BARCODE_INFO) })
         }
-        add("OUTPUT" to outItems)
+        add("OUTPUT" to out)
 
         // TAMPILAN & SISTEM
-        val sysItems = mutableListOf<SettingItem>()
-        sysItems.add(SettingItem(
-            "tema", "Tema",
+        val sys = mutableListOf<SettingItem>()
+        sys.add(SettingItem("tema", "Tema Terang/Gelap",
             "Terang / Gelap / Ikut Sistem",
-            Icons.Default.Palette, Color(0xFF9C27B0)
+            Icons.Default.DarkMode, Color(0xFF37474F")
         ) { nav.navigate(Routes.TEMA) })
+        sys.add(SettingItem("tema_warna", "Warna Brand",
+            "Ganti warna utama aplikasi",
+            Icons.Default.Palette, Color(0xFFF57C00")
+        ) { nav.navigate(Routes.TEMA_WARNA) })
         if (Session.can(PermissionKey.BACKUP_RESTORE)) {
-            sysItems.add(SettingItem(
-                "backup", "Backup & Restore",
+            sys.add(SettingItem("backup", "Backup & Restore",
                 "Simpan / pulihkan data ke file",
-                Icons.Default.Backup, Color(0xFF546E7A)
+                Icons.Default.Backup, Color(0xFF607D8B")
             ) { nav.navigate(Routes.BACKUP) })
         }
-        add("TAMPILAN & SISTEM" to sysItems)
+        add("TAMPILAN & SISTEM" to sys)
 
         // TENTANG
         add("TENTANG" to listOf(
-            SettingItem(
-                "tentang", "Tentang Aplikasi",
-                "iyonzkasir v0.7.0",
-                Icons.Default.Info, Color(0xFF607D8B)
+            SettingItem("tentang", "Tentang Aplikasi",
+                "iyonzkasir v0.8.0",
+                Icons.Default.Info, Color(0xFF546E7A")
             ) { nav.navigate(Routes.TENTANG) }
         ))
     }
 
     val filteredGroups = if (searchQuery.isBlank()) groups
     else groups.mapNotNull { (title, items) ->
-        val filtered = items.filter {
-            it.title.contains(searchQuery, true) ||
-            it.subtitle.contains(searchQuery, true)
+        val f = items.filter {
+            it.title.contains(searchQuery, true) || it.subtitle.contains(searchQuery, true)
         }
-        if (filtered.isEmpty()) null else title to filtered
+        if (f.isEmpty()) null else title to f
     }
 
     Scaffold(
@@ -216,9 +221,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                         Box(
                             Modifier.size(56.dp).clip(CircleShape).background(BRAND),
                             contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Storefront, null, tint = Color.White)
-                        }
+                        ) { Icon(Icons.Default.Storefront, null, tint = Color.White) }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(namaToko.ifBlank { "Toko Saya" },
@@ -279,9 +282,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                     value = searchQuery, onValueChange = { searchQuery = it },
                     placeholder = { Text("Cari pengaturan...",
                         style = MaterialTheme.typography.bodySmall) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, null, Modifier.size(18.dp))
-                    },
+                    leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                     trailingIcon = {
                         if (searchQuery.isNotEmpty()) {
                             IconButton(onClick = { searchQuery = "" },
@@ -292,10 +293,8 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                     },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
-                        .height(52.dp)
+                    modifier = Modifier.fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp).height(52.dp)
                 )
             }
 
@@ -303,38 +302,29 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 item {
                     Box(Modifier.fillMaxWidth().padding(48.dp),
                         contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Default.SearchOff, null,
-                                Modifier.size(48.dp),
-                                MaterialTheme.colorScheme.onSurfaceVariant)
-                            Spacer(Modifier.height(8.dp))
-                            Text("Nggak ada pengaturan yang cocok",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
+                        Text("Nggak ada yang cocok",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             } else {
-                filteredGroups.forEach { (groupTitle, items) ->
+                filteredGroups.forEach { (title, items) ->
                     item {
-                        Text(groupTitle,
+                        Text(title,
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = BRAND,
+                            fontWeight = FontWeight.Bold, color = BRAND,
                             modifier = Modifier.padding(
                                 start = 20.dp, top = 16.dp, bottom = 6.dp
                             ))
                     }
-                    items(items, key = { it.key }) { item ->
-                        SettingRow(item)
-                    }
+                    items(items, key = { it.key }) { SettingRow(it) }
                 }
             }
 
             item {
                 Box(Modifier.fillMaxWidth().padding(24.dp),
                     contentAlignment = Alignment.Center) {
-                    Text("iyonzkasir v0.7.0 • Made with ❤️",
+                    Text("iyonzkasir v0.8.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -357,9 +347,7 @@ private fun SettingRow(item: SettingItem) {
                 Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
                     .background(item.color.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
-            ) {
-                Icon(item.icon, null, Modifier.size(22.dp), item.color)
-            }
+            ) { Icon(item.icon, null, Modifier.size(22.dp), item.color) }
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text(item.title, fontWeight = FontWeight.Medium)
@@ -375,6 +363,421 @@ private fun SettingRow(item: SettingItem) {
         }
     }
     HorizontalDivider(Modifier.padding(start = 70.dp), thickness = 0.5.dp)
+}
+
+// ═══════════════════════════════════════════════════════════
+// TEMA WARNA BRAND — BARU
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TemaWarnaRoute(app: IyonzApp, nav: NavHostController) {
+    val scope = rememberCoroutineScope()
+    var selected by remember { mutableStateOf(AppTheme.ORANGE) }
+
+    LaunchedEffect(Unit) {
+        selected = app.settingRepo.getAppTheme()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Warna Brand") },
+                navigationIcon = {
+                    IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White
+                )
+            )
+        }
+    ) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("Warna Aktif",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(40.dp).clip(CircleShape)
+                                    .background(BrandColors.primary)
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text(BrandColors.theme.label,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium)
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Pilih warna di bawah — semua tombol, header, & aksen berubah otomatis",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
+            items(AppTheme.values().toList()) { theme ->
+                val isSelected = selected == theme
+                Card(
+                    Modifier.fillMaxWidth().clickable {
+                        selected = theme
+                        ThemeManager.updateAppTheme(theme)
+                        scope.launch { app.settingRepo.setAppTheme(theme) }
+                    },
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) Color(theme.lightHex)
+                        else MaterialTheme.colorScheme.surface
+                    ),
+                    border = if (isSelected)
+                        androidx.compose.foundation.BorderStroke(2.dp, Color(theme.primaryHex))
+                    else null
+                ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        // Preview warna — 3 lingkaran
+                        Box(Modifier.width(72.dp).height(40.dp)) {
+                            Box(Modifier.size(32.dp).clip(CircleShape)
+                                .background(Color(theme.lightHex))
+                                .align(Alignment.BottomStart))
+                            Box(Modifier.size(36.dp).clip(CircleShape)
+                                .background(Color(theme.primaryHex))
+                                .align(Alignment.Center))
+                            Box(Modifier.size(28.dp).clip(CircleShape)
+                                .background(Color(theme.darkHex))
+                                .align(Alignment.TopEnd))
+                        }
+                        Spacer(Modifier.width(16.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("${theme.emoji} ${theme.label}",
+                                fontWeight = FontWeight.SemiBold)
+                            Text("Primary: #${theme.primaryHex.toString(16).uppercase().takeLast(6)}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        RadioButton(selected = isSelected, onClick = null)
+                    }
+                }
+            }
+
+            item {
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("💡 Tips",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("• Warna brand dipakai di header, tombol, chip, & aksen\n" +
+                             "• Untuk mode gelap, warna otomatis disesuaikan tone-nya\n" +
+                             "• Bisa ganti kapan saja, langsung terlihat efeknya",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// TEMPLATE STRUK — BARU
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TemplateStrukRoute(app: IyonzApp, nav: NavHostController) {
+    val scope = rememberCoroutineScope()
+    var showKasir by remember { mutableStateOf(true) }
+    var showMeja by remember { mutableStateOf(true) }
+    var showPelanggan by remember { mutableStateOf(true) }
+    var showCatatan by remember { mutableStateOf(true) }
+    var showAntrian by remember { mutableStateOf(true) }
+    var showPoin by remember { mutableStateOf(true) }
+    var showAlamat by remember { mutableStateOf(true) }
+    var showTelepon by remember { mutableStateOf(true) }
+
+    LaunchedEffect(Unit) {
+        showKasir = app.settingRepo.isStrukShowKasir()
+        showMeja = app.settingRepo.isStrukShowMeja()
+        showPelanggan = app.settingRepo.isStrukShowPelanggan()
+        showCatatan = app.settingRepo.isStrukShowCatatan()
+        showAntrian = app.settingRepo.isStrukShowAntrian()
+        showPoin = app.settingRepo.isStrukShowPoin()
+        showAlamat = app.settingRepo.isStrukShowAlamat()
+        showTelepon = app.settingRepo.isStrukShowTelepon()
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Template Struk") },
+                navigationIcon = {
+                    IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White
+                )
+            )
+        }
+    ) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Receipt, null,
+                                tint = BRAND, modifier = Modifier.size(28.dp))
+                            Spacer(Modifier.width(12.dp))
+                            Column(Modifier.weight(1f)) {
+                                Text("Custom Struk",
+                                    fontWeight = FontWeight.Bold)
+                                Text("Atur field apa saja yang muncul di struk",
+                                    style = MaterialTheme.typography.bodySmall)
+                            }
+                        }
+                    }
+                }
+            }
+
+            item { Text("Info Toko", fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelLarge, color = BRAND) }
+
+            item {
+                ToggleRow("Tampilkan Alamat",
+                    "Alamat toko di bagian atas", showAlamat) {
+                    showAlamat = it
+                    scope.launch { app.settingRepo.setStrukShowAlamat(it) }
+                }
+            }
+            item {
+                ToggleRow("Tampilkan Telepon",
+                    "Nomor telepon / WA di header", showTelepon) {
+                    showTelepon = it
+                    scope.launch { app.settingRepo.setStrukShowTelepon(it) }
+                }
+            }
+
+            item { Spacer(Modifier.height(4.dp)) }
+            item { Text("Info Pesanan", fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelLarge, color = BRAND) }
+
+            item {
+                ToggleRow("Tampilkan Nama Kasir",
+                    "Siapa yang melayani transaksi ini", showKasir) {
+                    showKasir = it
+                    scope.launch { app.settingRepo.setStrukShowKasir(it) }
+                }
+            }
+            item {
+                ToggleRow("Tampilkan Nomor Meja",
+                    "Meja untuk Dine-in / F&B", showMeja) {
+                    showMeja = it
+                    scope.launch { app.settingRepo.setStrukShowMeja(it) }
+                }
+            }
+            item {
+                ToggleRow("Tampilkan Nama Pelanggan",
+                    "Nama & member pelanggan", showPelanggan) {
+                    showPelanggan = it
+                    scope.launch { app.settingRepo.setStrukShowPelanggan(it) }
+                }
+            }
+            item {
+                ToggleRow("Tampilkan Nomor Antrian",
+                    "Nomor antrian pesanan", showAntrian) {
+                    showAntrian = it
+                    scope.launch { app.settingRepo.setStrukShowAntrian(it) }
+                }
+            }
+            item {
+                ToggleRow("Tampilkan Catatan Item",
+                    "Catatan per item (pedas, dll)", showCatatan) {
+                    showCatatan = it
+                    scope.launch { app.settingRepo.setStrukShowCatatan(it) }
+                }
+            }
+            item {
+                ToggleRow("Tampilkan Poin Member",
+                    "Poin yang didapat dari order", showPoin) {
+                    showPoin = it
+                    scope.launch { app.settingRepo.setStrukShowPoin(it) }
+                }
+            }
+
+            item {
+                Spacer(Modifier.height(8.dp))
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text("💡 Preview",
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("Perubahan langsung terlihat di struk berikutnya",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun ToggleRow(
+    title: String, subtitle: String, value: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    Card {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(title, fontWeight = FontWeight.Medium)
+                Text(subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = value, onCheckedChange = onChange)
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+// NOMOR ANTRIAN — BARU
+// ═══════════════════════════════════════════════════════════
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AntrianRoute(app: IyonzApp, nav: NavHostController) {
+    val scope = rememberCoroutineScope()
+    var enabled by remember { mutableStateOf(false) }
+    var prefix by remember { mutableStateOf("") }
+    var nextNumber by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(Unit) {
+        enabled = app.settingRepo.isAntrianEnabled()
+        prefix = app.settingRepo.getAntrianPrefix()
+        nextNumber = try { app.posRepo.nextNomorAntrian() } catch (_: Exception) { 1 }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Nomor Antrian") },
+                navigationIcon = {
+                    IconButton(onClick = { nav.popBackStack() }) {
+                        Icon(Icons.Default.ArrowBack, null)
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White
+                )
+            )
+        }
+    ) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.ConfirmationNumber, null,
+                            tint = BRAND, modifier = Modifier.size(32.dp))
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Nomor Antrian Otomatis",
+                                fontWeight = FontWeight.Bold)
+                            Text("Auto-generate untuk setiap order",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        Switch(checked = enabled, onCheckedChange = {
+                            enabled = it
+                            scope.launch { app.settingRepo.setAntrianEnabled(it) }
+                        })
+                    }
+                }
+            }
+
+            if (enabled) {
+                item {
+                    Card {
+                        Column(Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Prefix (Opsional)",
+                                fontWeight = FontWeight.SemiBold)
+                            OutlinedTextField(
+                                value = prefix,
+                                onValueChange = {
+                                    prefix = it.take(5)
+                                    scope.launch { app.settingRepo.setAntrianPrefix(prefix) }
+                                },
+                                label = { Text("cth: A-, ORD-") },
+                                placeholder = { Text("Kosongin kalau nggak pakai") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                            Text("Nomor akan jadi: ${prefix}${nextNumber}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = BRAND, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                item {
+                    Card {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Contoh Tampilan",
+                                fontWeight = FontWeight.SemiBold)
+                            Spacer(Modifier.height(8.dp))
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text("${prefix}${nextNumber}",
+                                    modifier = Modifier.padding(16.dp)
+                                        .fillMaxWidth(),
+                                    style = MaterialTheme.typography.headlineLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BRAND,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            Text("Nomor reset otomatis setiap hari",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            } else {
+                item {
+                    Card(colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Nomor antrian nonaktif",
+                                fontWeight = FontWeight.SemiBold)
+                            Text("Aktifkan untuk auto-generate nomor antrian di setiap transaksi",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+
+            item { Spacer(Modifier.height(24.dp)) }
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -418,13 +821,11 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                 Card {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF43A047).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
+                            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF43A047).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.Receipt, null,
-                                    Modifier.size(22.dp), Color(0xFF43A047))
+                                    Modifier.size(22.dp), Color(0xFF43A047"))
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
@@ -441,22 +842,13 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                                     selected = pajakDefault == p,
                                     onClick = {
                                         pajakDefault = p
-                                        scope.launch {
-                                            app.settingRepo.setPajakDefault(p)
-                                        }
+                                        scope.launch { app.settingRepo.setPajakDefault(p) }
                                     },
                                     label = { Text(if (p == 0) "Off" else "$p%",
                                         style = MaterialTheme.typography.bodySmall) }
                                 )
                             }
                         }
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            if (pajakDefault == 0) "PPN tidak otomatis diterapkan"
-                            else "PPN ${pajakDefault}% otomatis di setiap transaksi",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
                     }
                 }
             }
@@ -465,13 +857,11 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                 Card {
                     Column(Modifier.padding(16.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0xFF1E88E5).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
+                            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF1E88E5).copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center) {
                                 Icon(Icons.Default.CreditCard, null,
-                                    Modifier.size(22.dp), Color(0xFF1E88E5))
+                                    Modifier.size(22.dp), Color(0xFF1E88E5"))
                             }
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
@@ -490,9 +880,7 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                                         val newSet = if (aktif) metodeAktif - m.id
                                         else metodeAktif + m.id
                                         metodeAktif = newSet
-                                        scope.launch {
-                                            app.settingRepo.setMetodeAktif(newSet)
-                                        }
+                                        scope.launch { app.settingRepo.setMetodeAktif(newSet) }
                                     }
                                     .padding(vertical = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -503,9 +891,7 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                                         val newSet = if (c) metodeAktif + m.id
                                         else metodeAktif - m.id
                                         metodeAktif = newSet
-                                        scope.launch {
-                                            app.settingRepo.setMetodeAktif(newSet)
-                                        }
+                                        scope.launch { app.settingRepo.setMetodeAktif(newSet) }
                                     }
                                 )
                                 Spacer(Modifier.width(8.dp))
@@ -518,15 +904,12 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
 
             item {
                 Card {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF9C27B0).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center
-                        ) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF9C27B0).copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center) {
                             Icon(Icons.Default.VolumeUp, null,
-                                Modifier.size(22.dp), Color(0xFF9C27B0))
+                                Modifier.size(22.dp), Color(0xFF9C27B0"))
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
@@ -535,13 +918,10 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(
-                            checked = soundEnabled,
-                            onCheckedChange = {
-                                soundEnabled = it
-                                scope.launch { app.settingRepo.setSoundEnabled(it) }
-                            }
-                        )
+                        Switch(checked = soundEnabled, onCheckedChange = {
+                            soundEnabled = it
+                            scope.launch { app.settingRepo.setSoundEnabled(it) }
+                        })
                     }
                 }
             }
@@ -577,8 +957,7 @@ fun BarcodeInfoRoute(app: IyonzApp, nav: NavHostController) {
         ) {
             item {
                 Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.QrCodeScanner, null,
                             Modifier.size(40.dp), BRAND)
                         Spacer(Modifier.width(12.dp))
@@ -586,85 +965,44 @@ fun BarcodeInfoRoute(app: IyonzApp, nav: NavHostController) {
                             Text("Barcode Aktif",
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium)
-                            Text("Scan barcode langsung dari kamera HP",
+                            Text("Scan dari kamera / galeri",
                                 style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
             }
-
             item {
-                InfoCard(
-                    icon = Icons.Default.Restaurant,
-                    title = "1. Setiap menu bisa punya barcode",
-                    desc = "Edit menu → isi field Barcode (scan atau ketik manual)"
-                )
-            }
-            item {
-                InfoCard(
-                    icon = Icons.Default.PointOfSale,
-                    title = "2. Scan di layar Kasir",
-                    desc = "Tap ikon scan di kanan atas Kasir → arahkan ke barcode → otomatis masuk keranjang"
-                )
-            }
-            item {
-                InfoCard(
-                    icon = Icons.Default.Image,
-                    title = "3. Scan dari galeri",
-                    desc = "Punya foto barcode? Bisa scan dari galeri tanpa kamera"
-                )
-            }
-            item {
-                InfoCard(
-                    icon = Icons.Default.QrCode,
-                    title = "Format didukung",
-                    desc = "EAN-13, EAN-8, UPC, Code-128, Code-39, QR Code, Data Matrix, PDF417, Aztec"
-                )
+                Card {
+                    Column(Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Cara Pakai", fontWeight = FontWeight.Bold)
+                        Text("1. Edit menu → isi field Barcode",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("2. Buka Kasir → tap ikon scan di kanan atas",
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("3. Arahkan kamera → auto masuk ke keranjang",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
             item {
                 Card(colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
                     Column(Modifier.padding(16.dp)) {
-                        Text("💡 Tips",
+                        Text("💡 Format Didukung",
                             fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.bodyMedium)
-                        Spacer(Modifier.height(6.dp))
-                        Text("• Barcode paling berguna untuk: toko retail, warung, toko bangunan\n" +
-                             "• Untuk F&B: bisa pakai barcode custom (print sendiri atau beli label)\n" +
-                             "• Untuk laundry/jasa: biasanya tidak perlu",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            style = MaterialTheme.typography.bodySmall)
+                        Text("EAN-13, EAN-8, UPC, Code-128, Code-39, QR, Data Matrix, PDF417, Aztec",
+                            style = MaterialTheme.typography.labelSmall)
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun InfoCard(icon: ImageVector, title: String, desc: String) {
-    Card {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                    .background(BRAND_LIGHT),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(icon, null, Modifier.size(22.dp), BRAND)
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium)
-                Text(desc, style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-// TEMA
+// TEMA TERANG/GELAP
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -688,11 +1026,9 @@ fun TemaRoute(app: IyonzApp, nav: NavHostController) {
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize().padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Pilih tampilan yang nyaman buat kamu",
+            Text("Pilih mode terang / gelap",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(8.dp))
-
             ThemeMode.values().forEach { mode ->
                 val isSelected = selected == mode
                 Card(
@@ -707,23 +1043,19 @@ fun TemaRoute(app: IyonzApp, nav: NavHostController) {
                     )
                 ) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            when (mode) {
-                                ThemeMode.SYSTEM -> Icons.Default.SettingsBrightness
-                                ThemeMode.LIGHT -> Icons.Default.LightMode
-                                ThemeMode.DARK -> Icons.Default.DarkMode
-                            }, null, tint = BRAND
-                        )
+                        Icon(when (mode) {
+                            ThemeMode.SYSTEM -> Icons.Default.SettingsBrightness
+                            ThemeMode.LIGHT -> Icons.Default.LightMode
+                            ThemeMode.DARK -> Icons.Default.DarkMode
+                        }, null, tint = BRAND)
                         Spacer(Modifier.width(16.dp))
                         Column(Modifier.weight(1f)) {
                             Text(mode.label, fontWeight = FontWeight.SemiBold)
-                            Text(
-                                when (mode) {
-                                    ThemeMode.SYSTEM -> "Ikut pengaturan HP"
-                                    ThemeMode.LIGHT -> "Selalu terang"
-                                    ThemeMode.DARK -> "Selalu gelap"
-                                },
-                                style = MaterialTheme.typography.bodySmall,
+                            Text(when (mode) {
+                                ThemeMode.SYSTEM -> "Ikut pengaturan HP"
+                                ThemeMode.LIGHT -> "Selalu terang"
+                                ThemeMode.DARK -> "Selalu gelap"
+                            }, style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         RadioButton(selected = isSelected, onClick = null)
@@ -749,8 +1081,8 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
         val map = mutableMapOf<String, MutableList<Pair<FeatureKey, Boolean>>>()
         FeatureKey.values().forEach { key ->
             val match = searchQuery.isBlank() ||
-                    key.label.contains(searchQuery, ignoreCase = true) ||
-                    key.key.contains(searchQuery, ignoreCase = true)
+                    key.label.contains(searchQuery, true) ||
+                    key.key.contains(searchQuery, true)
             if (!match) return@forEach
             val enabled = toggles.firstOrNull { it.featureKey == key.key }?.enabled ?: false
             map.getOrPut(key.kategori) { mutableListOf() }.add(key to enabled)
@@ -783,44 +1115,42 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
                 leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(12.dp)
-                    .height(52.dp)
+                modifier = Modifier.fillMaxWidth().padding(12.dp).height(52.dp)
             )
-
-            LazyColumn(
-                Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp)
-            ) {
+            LazyColumn(Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 24.dp)) {
                 grouped.forEach { (kategori, items) ->
                     item {
                         Text("$kategori (${items.count { it.second }}/${items.size})",
                             style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = BRAND,
-                            modifier = Modifier.padding(
-                                start = 20.dp, top = 16.dp, bottom = 6.dp
-                            ))
+                            fontWeight = FontWeight.Bold, color = BRAND,
+                            modifier = Modifier.padding(start = 20.dp, top = 16.dp, bottom = 6.dp))
                     }
                     items(items, key = { it.first.key }) { (feature, enabled) ->
-                        FeatureToggleRow(
-                            feature = feature,
-                            enabled = enabled,
-                            onToggle = { newValue ->
-                                scope.launch {
-                                    app.featureRepo.setEnabled(feature, newValue)
-                                    Session.current?.let { u ->
-                                        app.userRepo.log(
-                                            u.id, u.nama,
-                                            if (newValue) "FEATURE_ON" else "FEATURE_OFF",
-                                            targetId = feature.key,
-                                            keterangan = feature.label
-                                        )
+                        Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface) {
+                            Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(feature.label, fontWeight = FontWeight.Medium)
+                                    if (feature.deskripsi.isNotBlank()) {
+                                        Text(feature.deskripsi,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
+                                Switch(checked = enabled, onCheckedChange = { newValue ->
+                                    scope.launch {
+                                        app.featureRepo.setEnabled(feature, newValue)
+                                        Session.current?.let { u ->
+                                            app.userRepo.log(u.id, u.nama,
+                                                if (newValue) "FEATURE_ON" else "FEATURE_OFF",
+                                                targetId = feature.key, keterangan = feature.label)
+                                        }
+                                    }
+                                })
                             }
-                        )
+                        }
+                        HorizontalDivider(thickness = 0.5.dp)
                     }
                 }
                 item { Spacer(Modifier.height(24.dp)) }
@@ -832,7 +1162,7 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
             title = { Text("Reset ke Preset?") },
-            text = { Text("Semua pengaturan fitur akan dikembalikan ke default sesuai jenis usaha kamu.") },
+            text = { Text("Semua fitur akan dikembalikan ke default sesuai jenis usaha kamu.") },
             confirmButton = {
                 TextButton(onClick = {
                     scope.launch {
@@ -850,31 +1180,6 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
     }
 }
 
-@Composable
-private fun FeatureToggleRow(
-    feature: FeatureKey, enabled: Boolean, onToggle: (Boolean) -> Unit
-) {
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(feature.label, fontWeight = FontWeight.Medium)
-                if (feature.deskripsi.isNotBlank()) {
-                    Text(feature.deskripsi, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            Switch(checked = enabled, onCheckedChange = onToggle)
-        }
-    }
-    HorizontalDivider(thickness = 0.5.dp)
-}
-
 // ═══════════════════════════════════════════════════════════
 // PROFIL TOKO
 // ═══════════════════════════════════════════════════════════
@@ -883,7 +1188,6 @@ private fun FeatureToggleRow(
 fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-
     var nama by remember { mutableStateOf("") }
     var alamat by remember { mutableStateOf("") }
     var telepon by remember { mutableStateOf("") }
@@ -908,8 +1212,7 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
         if (uri != null) {
             try {
                 ctx.contentResolver.takePersistableUriPermission(
-                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
+                    uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             } catch (_: Exception) {}
             logoUri = uri.toString()
         }
@@ -957,10 +1260,8 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 item {
-                    Column(
-                        Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
+                    Column(Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally) {
                         Box(
                             Modifier.size(100.dp).clip(CircleShape).background(BRAND_LIGHT)
                                 .clickable { picker.launch(arrayOf("image/*")) },
@@ -1053,31 +1354,25 @@ fun TentangRoute(nav: NavHostController) {
             )
         }
     ) { pad ->
-        Column(
-            Modifier.padding(pad).fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
+        Column(Modifier.padding(pad).fillMaxSize().padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally) {
             Spacer(Modifier.height(24.dp))
-            Box(
-                Modifier.size(96.dp).clip(RoundedCornerShape(24.dp)).background(BRAND),
-                contentAlignment = Alignment.Center
-            ) {
+            Box(Modifier.size(96.dp).clip(RoundedCornerShape(24.dp)).background(BRAND),
+                contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.PointOfSale, null,
                     tint = Color.White, modifier = Modifier.size(56.dp))
             }
             Spacer(Modifier.height(16.dp))
             Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.7.0", style = MaterialTheme.typography.bodyMedium,
+            Text("v0.8.0", style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
-            Text(
-                "Aplikasi kasir serbaguna untuk semua jenis usaha:\n" +
-                "warung, retail, cafe, restoran, laundry, toko bangunan, dan jasa.\n\n" +
-                "Offline by default, simple by default, aman by design.",
+            Text("Aplikasi kasir serbaguna untuk semua jenis usaha:\n" +
+                 "warung, retail, cafe, restoran, laundry, toko bangunan, dan jasa.\n\n" +
+                 "Offline by default, simple by default, aman by design.",
                 style = MaterialTheme.typography.bodyMedium,
-                textAlign = androidx.compose.ui.text.style.TextAlign.Center
-            )
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.weight(1f))
             Text("© 2025 iyonzkasir",
                 style = MaterialTheme.typography.bodySmall,
