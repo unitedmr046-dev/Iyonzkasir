@@ -14,7 +14,7 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
 
-    <!-- Notifikasi (auto backup reminder) -->
+    <!-- Notifikasi -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Kamera (barcode scanner) -->
@@ -34,6 +34,8 @@
             android:name=".MainActivity"
             android:exported="true"
             android:label="iyonzkasir"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize"
+            android:screenOrientation="unspecified"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
