@@ -45,17 +45,6 @@ import java.util.Calendar
 // ═══════════════════════════════════════════════════════════
 // VIEWMODEL
 // ═══════════════════════════════════════════════════════════
-enum class Periode(val id: String, val label: String) {
-    HARI_INI("hari", "Hari Ini"),
-    MINGGU("minggu", "7 Hari"),
-    BULAN("bulan", "30 Hari"),
-    SEMUA("semua", "Semua");
-
-    companion object {
-        fun fromId(id: String) = values().firstOrNull { it.id == id } ?: HARI_INI
-    }
-}
-
 class PengeluaranViewModel(private val repo: ExpenseRepository) : ViewModel() {
 
     var periode by mutableStateOf(Periode.HARI_INI)
