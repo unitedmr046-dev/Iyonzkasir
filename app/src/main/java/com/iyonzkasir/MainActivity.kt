@@ -31,6 +31,9 @@ class IyonzApp : Application() {
     val settingRepo: SettingRepository by lazy { SettingRepository(database.settingDao()) }
     val featureRepo: FeatureRepository by lazy { FeatureRepository(database.featureDao()) }
     val kategoriRepo: KategoriRepository by lazy { KategoriRepository(database.kategoriDao()) }
+    val expenseRepo: ExpenseRepository by lazy {
+        ExpenseRepository(database.expenseCategoryDao(), database.expenseDao())
+    }
     val posRepo: PosRepository by lazy {
         PosRepository(database.menuDao(), database.orderDao(), database.shiftDao())
     }
@@ -101,7 +104,9 @@ object Routes {
     const val FEATURE_TOGGLE = "feature_toggle"
     const val PROFIL_TOKO = "profil_toko"
     const val TEMA = "tema"
+    const val TEMA_WARNA = "tema_warna"
     const val PRINTER = "printer"
+    const val TEMPLATE_STRUK = "template_struk"
     const val LAPORAN = "laporan"
     const val BACKUP = "backup"
     const val CRM = "crm"
@@ -109,6 +114,8 @@ object Routes {
     const val KATEGORI = "kategori"
     const val KEUANGAN = "keuangan"
     const val BARCODE_INFO = "barcode_info"
+    const val PENGELUARAN = "pengeluaran"
+    const val ANTRIAN = "antrian"
     const val TENTANG = "tentang"
 }
 
@@ -126,12 +133,37 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun AppRoot(app: IyonzApp) {
     val nav = rememberNavController()
+    var loaded by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        // Load tema warna brand dari DB
+        try {
+            val theme = app.settingRepo.getAppTheme()
+            ThemeManager.updateAppTheme(theme)
+        } catch (_: Exception) {}
+
+        // Load tema mode (gelap/terang)
         ThemeManager.update(app.settingRepo.getThemeMode())
+
+        // Init feature toggle
         app.featureRepo.ensureInitialized()
+
+        // Init auto backup
         BackupScheduler.scheduleDaily(app)
         BackupNotifier.maybeRemind(app, app.settingRepo)
+
+        loaded = true
+    }
+
+    // Tunggu theme loading selesai biar warna konsisten
+    if (!loaded) {
+        IyonzTheme {
+            Surface(
+                color = MaterialTheme.colorScheme.background,
+                modifier = Modifier.fillMaxSize()
+            ) {}
+        }
+        return
     }
 
     NavHost(navController = nav, startDestination = Routes.SPLASH) {
@@ -176,7 +208,9 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.FEATURE_TOGGLE) { FeatureToggleRoute(app, nav) }
         composable(Routes.PROFIL_TOKO) { ProfilTokoRoute(app, nav) }
         composable(Routes.TEMA) { TemaRoute(app, nav) }
+        composable(Routes.TEMA_WARNA) { TemaWarnaRoute(app, nav) }
         composable(Routes.PRINTER) { PrinterRoute(app, nav) }
+        composable(Routes.TEMPLATE_STRUK) { TemplateStrukRoute(app, nav) }
         composable(Routes.LAPORAN) { LaporanRoute(app, nav) }
         composable(Routes.BACKUP) { BackupRoute(app, nav) }
         composable(Routes.CRM) { CrmRoute(app, nav) }
@@ -184,12 +218,14 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.KATEGORI) { KategoriRoute(app, nav) }
         composable(Routes.KEUANGAN) { KeuanganRoute(app, nav) }
         composable(Routes.BARCODE_INFO) { BarcodeInfoRoute(app, nav) }
+        composable(Routes.PENGELUARAN) { PengeluaranRoute(app, nav) }
+        composable(Routes.ANTRIAN) { AntrianRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-// MAIN SHELL (Bottom Navigation - 5 Tab)
+// MAIN SHELL
 // ═══════════════════════════════════════════════════════════
 private data class NavTab(
     val route: String, val label: String, val icon: ImageVector,
@@ -250,14 +286,12 @@ fun MainShell(app: IyonzApp, nav: NavHostController) {
     ) { pad ->
         NavHost(innerNav, startDestination = Routes.TAB_HOME,
             modifier = Modifier.padding(pad)) {
-            // 5 Tab Utama
             composable(Routes.TAB_HOME) { HomeRoute(app, nav, innerNav) }
             composable(Routes.TAB_POS) { PosRoute(app, nav, innerNav) }
             composable(Routes.TAB_INVENTARIS) { InventarisRoute(app, nav) }
             composable(Routes.TAB_DASHBOARD) { DashboardRoute(app) }
             composable(Routes.TAB_SETTINGS) { SettingsRoute(app, nav) }
 
-            // Akses via Home shortcut
             composable(Routes.TAB_MENU) { MenuRoute(app, nav, innerNav) }
             composable(Routes.TAB_OPEN_BILL) { OpenBillRoute(app, nav, innerNav) }
             composable(Routes.TAB_RIWAYAT) { RiwayatRoute(app) }
