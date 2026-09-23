@@ -16,10 +16,47 @@ import java.text.NumberFormat
 import java.text.SimpleDateFormat
 import java.util.*
 
-// ═══════ BRAND ═══════
-val BRAND = Color(0xFFFF6B35)
-val BRAND_LIGHT = Color(0xFFFFE4D6)
-val BRAND_DARK = Color(0xFFC44E1F)
+// ═══════ THEME PRESET (warna brand) ═══════
+enum class AppTheme(
+    val id: String,
+    val label: String,
+    val primaryHex: Long,
+    val lightHex: Long,
+    val darkHex: Long,
+    val emoji: String
+) {
+    ORANGE("orange", "Orange", 0xFFFF6B35, 0xFFFFE4D6, 0xFFC44E1F, "🟧"),
+    HIJAU("hijau", "Hijau", 0xFF2E7D32, 0xFFC8E6C9, 0xFF1B5E20, "🟩"),
+    BIRU("biru", "Biru", 0xFF1976D2, 0xFFBBDEFB, 0xFF0D47A1, "🟦"),
+    UNGU("ungu", "Ungu", 0xFF7B1FA2, 0xFFE1BEE7, 0xFF4A148C, "🟪"),
+    MERAH("merah", "Merah", 0xFFD32F2F, 0xFFFFCDD2, 0xFFB71C1C, "🟥"),
+    PINK("pink", "Pink", 0xFFE91E63, 0xFFF8BBD0, 0xFFAD1457, "🌸"),
+    TEAL("teal", "Teal", 0xFF00897B, 0xFFB2DFDB, 0xFF004D40, "🟢"),
+    GOLD("gold", "Gold", 0xFFFFB300, 0xFFFFECB3, 0xFFF57F17, "🟨");
+
+    companion object {
+        fun fromId(id: String) = values().firstOrNull { it.id == id } ?: ORANGE
+    }
+}
+
+// ═══════ BRAND COLORS (dynamic) ═══════
+object BrandColors {
+    var theme by mutableStateOf(AppTheme.ORANGE)
+        private set
+
+    val primary: Color get() = Color(theme.primaryHex)
+    val primaryLight: Color get() = Color(theme.lightHex)
+    val primaryDark: Color get() = Color(theme.darkHex)
+
+    fun apply(t: AppTheme) { theme = t }
+}
+
+// ═══════ BRAND (getter dynamic, kompatibel dengan kode lama) ═══════
+val BRAND: Color get() = BrandColors.primary
+val BRAND_LIGHT: Color get() = BrandColors.primaryLight
+val BRAND_DARK: Color get() = BrandColors.primaryDark
+
+// Warna tetap (nggak ganti sama tema)
 val SUCCESS = Color(0xFF2E7D32)
 val WARNING = Color(0xFFF57C00)
 val DANGER = Color(0xFFD32F2F)
@@ -37,7 +74,7 @@ fun Long.tanggalPendek(): String =
 fun Long.jamPendek(): String =
     SimpleDateFormat("HH:mm", Locale("in", "ID")).format(Date(this))
 
-// ═══════ TEMA MODE ═══════
+// ═══════ TEMA MODE (gelap/terang) ═══════
 enum class ThemeMode(val id: String, val label: String) {
     SYSTEM("system", "Ikut Sistem"),
     LIGHT("light", "Terang"),
@@ -153,7 +190,6 @@ enum class FeatureKey(
     VOID_REFUND("pos_void_refund", "Void / Refund", "POS", "Batalkan transaksi"),
     HOLD_ORDER("pos_hold_order", "Hold Order", "POS", "Tahan pesanan sementara"),
 
-    // Inventaris
     POTONG_STOK("inv_potong_stok", "Potong Stok Otomatis", "Inventaris", "Kurangi stok saat jual"),
     LOW_STOCK_ALERT("inv_low_stock", "Alert Stok Menipis", "Inventaris", "Notifikasi stok minim"),
     STOCK_OPNAME("inv_opname", "Stock Opname", "Inventaris", "Koreksi stok fisik"),
@@ -161,10 +197,8 @@ enum class FeatureKey(
     RESEP("inv_resep", "Resep / Bahan Baku", "Inventaris", "Potong bahan saat jual"),
     PURCHASE_ORDER("inv_purchase_order", "Purchase Order", "Inventaris", "Order ke supplier"),
 
-    // Menu
     KATEGORI_MGMT("menu_kategori", "Kelola Kategori", "Menu", "CRUD kategori menu"),
 
-    // Laporan
     LAPORAN_HARIAN("rep_harian", "Laporan Harian", "Laporan", "Ringkasan penjualan"),
     LABA_PER_PRODUK("rep_laba_produk", "Laba per Produk", "Laporan", "Analisa margin"),
     GRAFIK("rep_grafik", "Grafik Penjualan", "Laporan", "Grafik & top produk"),
@@ -172,6 +206,7 @@ enum class FeatureKey(
     LACI_KASIR("rep_laci_kasir", "Manajemen Laci Kasir", "Laporan", "Hitung uang fisik"),
     EXPORT_EXCEL("rep_export_excel", "Export Excel / CSV", "Laporan", "Export ke Excel"),
     EXPORT_PDF("rep_export_pdf", "Export PDF", "Laporan", "Cetak PDF"),
+    PENGELUARAN("rep_pengeluaran", "Pengeluaran", "Laporan", "Catat biaya operasional"),
 
     MEMBER("crm_member", "Member & Poin", "CRM", "Sistem membership & poin"),
     VOUCHER("crm_voucher", "Voucher", "CRM", "Kode voucher / promo"),
@@ -191,6 +226,8 @@ enum class FeatureKey(
     JADWAL_SERVIS("jasa_jadwal", "Jadwal Servis", "Jasa", "Atur jadwal"),
     REMINDER("jasa_reminder", "Reminder Berkala", "Jasa", "Ingatkan pelanggan"),
 
+    NOMOR_ANTRIAN("pos_nomor_antrian", "Nomor Antrian", "POS", "Auto nomor antrian"),
+
     BACKUP_MANUAL("bk_manual", "Backup Manual", "Backup", "Backup ke storage"),
     BACKUP_OTOMATIS("bk_auto", "Backup Otomatis", "Backup", "Backup terjadwal"),
     BACKUP_CLOUD("bk_cloud", "Backup Cloud", "Backup", "Backup ke cloud"),
@@ -209,7 +246,7 @@ val BusinessType.defaultFeatures: Set<FeatureKey>
             FeatureKey.OPEN_BILL, FeatureKey.DISKON, FeatureKey.VOID_REFUND,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
             FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT,
-            FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK
+            FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK, FeatureKey.PENGELUARAN
         )
         BusinessType.RETAIL -> setOf(
             FeatureKey.BARCODE, FeatureKey.HARGA_GROSIR, FeatureKey.POTONG_STOK,
@@ -217,9 +254,9 @@ val BusinessType.defaultFeatures: Set<FeatureKey>
             FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
             FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.GRAFIK,
-            FeatureKey.PRINTER_BT, FeatureKey.EXPORT_EXCEL,
+            FeatureKey.PENGELUARAN, FeatureKey.PRINTER_BT, FeatureKey.EXPORT_EXCEL,
             FeatureKey.MEMBER, FeatureKey.VOUCHER, FeatureKey.HUTANG_PELANGGAN,
-            FeatureKey.WHATSAPP_INTENT, FeatureKey.KATEGORI_MGMT
+            FeatureKey.WHATSAPP_INTENT, FeatureKey.KATEGORI_MGMT, FeatureKey.NOMOR_ANTRIAN
         )
         BusinessType.FNB -> setOf(
             FeatureKey.NOMOR_MEJA, FeatureKey.KITCHEN_PRINT, FeatureKey.MODIFIER,
@@ -227,16 +264,17 @@ val BusinessType.defaultFeatures: Set<FeatureKey>
             FeatureKey.DISKON, FeatureKey.PAJAK, FeatureKey.VOID_REFUND,
             FeatureKey.HOLD_ORDER, FeatureKey.STATUS_DAPUR, FeatureKey.RESEP,
             FeatureKey.POTONG_STOK, FeatureKey.LOW_STOCK_ALERT, FeatureKey.STOCK_OPNAME,
-            FeatureKey.STOCK_HISTORY,
+            FeatureKey.STOCK_HISTORY, FeatureKey.NOMOR_ANTRIAN,
             FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK, FeatureKey.GRAFIK,
-            FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
+            FeatureKey.PENGELUARAN, FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
             FeatureKey.MEMBER, FeatureKey.VOUCHER, FeatureKey.WHATSAPP_INTENT,
             FeatureKey.KATEGORI_MGMT
         )
         BusinessType.LAUNDRY -> setOf(
             FeatureKey.STATUS_LAUNDRY, FeatureKey.ESTIMASI_SELESAI,
             FeatureKey.DP_PEMBAYARAN, FeatureKey.PICKUP_DELIVERY, FeatureKey.OPEN_BILL,
-            FeatureKey.WHATSAPP_INTENT, FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
+            FeatureKey.WHATSAPP_INTENT, FeatureKey.LAPORAN_HARIAN, FeatureKey.PENGELUARAN,
+            FeatureKey.PRINTER_BT, FeatureKey.NOMOR_ANTRIAN,
             FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN,
             FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK
         )
@@ -246,13 +284,14 @@ val BusinessType.defaultFeatures: Set<FeatureKey>
             FeatureKey.PURCHASE_ORDER, FeatureKey.HUTANG_SUPPLIER,
             FeatureKey.DISKON, FeatureKey.VOID_REFUND, FeatureKey.HOLD_ORDER,
             FeatureKey.OPEN_BILL, FeatureKey.LAPORAN_HARIAN, FeatureKey.LABA_PER_PRODUK,
-            FeatureKey.GRAFIK, FeatureKey.EXPORT_EXCEL, FeatureKey.PRINTER_BT,
-            FeatureKey.SHIFT_KASIR, FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN,
-            FeatureKey.WHATSAPP_INTENT, FeatureKey.KATEGORI_MGMT
+            FeatureKey.GRAFIK, FeatureKey.PENGELUARAN, FeatureKey.EXPORT_EXCEL,
+            FeatureKey.PRINTER_BT, FeatureKey.SHIFT_KASIR,
+            FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN, FeatureKey.WHATSAPP_INTENT,
+            FeatureKey.KATEGORI_MGMT, FeatureKey.NOMOR_ANTRIAN
         )
         BusinessType.JASA -> setOf(
             FeatureKey.JADWAL_SERVIS, FeatureKey.REMINDER, FeatureKey.WHATSAPP_INTENT,
-            FeatureKey.LAPORAN_HARIAN, FeatureKey.PRINTER_BT,
+            FeatureKey.LAPORAN_HARIAN, FeatureKey.PENGELUARAN, FeatureKey.PRINTER_BT,
             FeatureKey.MEMBER, FeatureKey.HUTANG_PELANGGAN,
             FeatureKey.KATEGORI_MGMT, FeatureKey.GRAFIK
         )
@@ -282,6 +321,7 @@ enum class PermissionKey(
 
     LIHAT_LAPORAN("perm_laporan", "Lihat Laporan", "Laporan", "Akses semua laporan"),
     EXPORT_DATA("perm_export", "Export Data", "Laporan", "Export ke Excel/PDF"),
+    KELOLA_PENGELUARAN("perm_pengeluaran", "Kelola Pengeluaran", "Laporan", "Catat pengeluaran"),
 
     KELOLA_MEMBER("perm_member", "Kelola Member & Poin", "CRM", "Tambah/edit member & poin"),
     KELOLA_VOUCHER("perm_voucher", "Kelola Voucher", "CRM", "Buat & kelola kode voucher"),
@@ -312,6 +352,7 @@ val UserRole.defaultPermissions: Set<PermissionKey>
             PermissionKey.STOCK_OPNAME, PermissionKey.KELOLA_STOK,
             PermissionKey.LIHAT_STOK,
             PermissionKey.LIHAT_LAPORAN, PermissionKey.EXPORT_DATA,
+            PermissionKey.KELOLA_PENGELUARAN,
             PermissionKey.KELOLA_MEMBER, PermissionKey.KELOLA_VOUCHER,
             PermissionKey.KELOLA_HUTANG
         )
@@ -335,6 +376,8 @@ object ThemeManager {
     var mode by mutableStateOf(ThemeMode.SYSTEM)
         private set
     fun update(m: ThemeMode) { mode = m }
+
+    fun updateAppTheme(t: AppTheme) { BrandColors.apply(t) }
 }
 
 // ═══════ LOYALTY ═══════
@@ -348,20 +391,11 @@ object LoyaltyConfig {
         rupiah / RUPIAH_PER_POIN else 0
 }
 
-// ═══════ WARNA KATEGORI PRESET ═══════
+// ═══════ WARNA PRESET ═══════
 val KATEGORI_WARNA_PRESET = listOf(
-    "#FF6B35", // Orange (brand)
-    "#E53935", // Merah
-    "#8E24AA", // Ungu
-    "#3949AB", // Biru tua
-    "#1E88E5", // Biru
-    "#00897B", // Teal
-    "#43A047", // Hijau
-    "#FDD835", // Kuning
-    "#FB8C00", // Oranye
-    "#6D4C41", // Coklat
-    "#546E7A", // Abu
-    "#D81B60"  // Pink
+    "#FF6B35", "#E53935", "#8E24AA", "#3949AB",
+    "#1E88E5", "#00897B", "#43A047", "#FDD835",
+    "#FB8C00", "#6D4C41", "#546E7A", "#D81B60"
 )
 
 fun String.toColorSafe(fallback: Color = BRAND): Color {
@@ -382,18 +416,23 @@ fun IyonzTheme(
     },
     content: @Composable () -> Unit
 ) {
+    val theme = BrandColors.theme
+    val primary = Color(theme.primaryHex)
+    val primaryLight = Color(theme.lightHex)
+    val primaryDark = Color(theme.darkHex)
+
     val colors = if (darkTheme) {
         darkColorScheme(
-            primary = BRAND, onPrimary = Color.White,
-            secondary = BRAND_DARK,
+            primary = primary, onPrimary = Color.White,
+            secondary = primaryDark,
             surfaceVariant = Color(0xFF2A2A2A),
             background = Color(0xFF121212),
             surface = Color(0xFF1E1E1E)
         )
     } else {
         lightColorScheme(
-            primary = BRAND, onPrimary = Color.White,
-            secondary = BRAND_DARK,
+            primary = primary, onPrimary = Color.White,
+            secondary = primaryDark,
             surfaceVariant = Color(0xFFF5F5F5)
         )
     }
