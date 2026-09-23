@@ -381,7 +381,6 @@ fun HomeScreen(
                         Column(
                             Modifier.fillMaxWidth()
                                 .widthIn(max = 900.dp)
-                                .align(Alignment.CenterHorizontally)
                         ) {
                             Card(
                                 Modifier.fillMaxWidth().padding(16.dp, 16.dp, 16.dp, 0.dp),
@@ -438,7 +437,6 @@ fun HomeScreen(
                     Column(
                         Modifier.fillMaxWidth()
                             .widthIn(max = 900.dp)
-                            .align(Alignment.CenterHorizontally)
                             .padding(16.dp)
                     ) {
                         Text("Menu Cepat",
@@ -481,7 +479,6 @@ fun HomeScreen(
                         Column(
                             Modifier.fillMaxWidth()
                                 .widthIn(max = 900.dp)
-                                .align(Alignment.CenterHorizontally)
                         ) {
                             Card(
                                 Modifier.fillMaxWidth().padding(16.dp, 0.dp),
