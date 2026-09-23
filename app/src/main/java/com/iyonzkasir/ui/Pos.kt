@@ -1,4 +1,5 @@
 package com.iyonzkasir.ui
+
 import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -82,10 +83,11 @@ class KasirViewModel(
 
     var barcodeMessage by mutableStateOf<String?>(null)
 
-    // Batch 10: loaded settings
     var soundEnabled by mutableStateOf(true)
         private set
     var metodeAktif by mutableStateOf<Set<String>>(emptySet())
+        private set
+    var antrianEnabled by mutableStateOf(false)
         private set
 
     private val _cart = MutableStateFlow<Map<String, CartLine>>(emptyMap())
@@ -96,13 +98,13 @@ class KasirViewModel(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     init {
-        // Load PPN default + sound + metode aktif dari settings
         viewModelScope.launch {
             try {
                 val ppn = settingRepo.getPajakDefault()
                 if (ppn > 0 && pajakPersen == 0) pajakPersen = ppn
                 soundEnabled = settingRepo.isSoundEnabled()
                 metodeAktif = settingRepo.getMetodeAktif()
+                antrianEnabled = settingRepo.isAntrianEnabled()
             } catch (_: Exception) {}
         }
     }
@@ -112,6 +114,7 @@ class KasirViewModel(
             try {
                 soundEnabled = settingRepo.isSoundEnabled()
                 metodeAktif = settingRepo.getMetodeAktif()
+                antrianEnabled = settingRepo.isAntrianEnabled()
             } catch (_: Exception) {}
         }
     }
@@ -154,9 +157,9 @@ class KasirViewModel(
         nomorMeja = ""; tipeOrder = TipeOrder.DINE_IN.id; namaPelanggan = ""
         editingOrderId = null
         diskonTipe = "NONE"; diskonValue = 0
-        // reset PPN ke default
         viewModelScope.launch {
-            try { pajakPersen = settingRepo.getPajakDefault() } catch (_: Exception) { pajakPersen = 0 }
+            try { pajakPersen = settingRepo.getPajakDefault() }
+            catch (_: Exception) { pajakPersen = 0 }
         }
         selectedMember = null
         voucherKode = ""; voucherAmount = 0; voucherError = null
@@ -230,15 +233,21 @@ class KasirViewModel(
             }
             val now = System.currentTimeMillis()
             when {
-                !v.aktif -> { voucherError = "Voucher tidak aktif"; if (soundEnabled) SoundHelper.playError(); return@launch }
+                !v.aktif -> {
+                    voucherError = "Voucher tidak aktif"
+                    if (soundEnabled) SoundHelper.playError(); return@launch
+                }
                 v.kuota > 0 && v.terpakai >= v.kuota -> {
-                    voucherError = "Kuota habis"; if (soundEnabled) SoundHelper.playError(); return@launch
+                    voucherError = "Kuota habis"
+                    if (soundEnabled) SoundHelper.playError(); return@launch
                 }
                 v.tglAkhir > 0 && v.tglAkhir < now -> {
-                    voucherError = "Voucher kadaluarsa"; if (soundEnabled) SoundHelper.playError(); return@launch
+                    voucherError = "Voucher kadaluarsa"
+                    if (soundEnabled) SoundHelper.playError(); return@launch
                 }
                 v.tglMulai > 0 && v.tglMulai > now -> {
-                    voucherError = "Voucher belum berlaku"; if (soundEnabled) SoundHelper.playError(); return@launch
+                    voucherError = "Voucher belum berlaku"
+                    if (soundEnabled) SoundHelper.playError(); return@launch
                 }
                 sub < v.minBelanja -> {
                     voucherError = "Min belanja ${v.minBelanja.rupiah()}"
@@ -322,8 +331,11 @@ class KasirViewModel(
                 LoyaltyConfig.hitungPoinDidapat(totalInt) else 0
             val potongStok = FeatureManager.isEnabled(FeatureKey.POTONG_STOK)
 
-            // Nomor antrian — auto-generate kalau fitur ON
-            val nomorAntrian = if (FeatureManager.isEnabled(FeatureKey.OPEN_BILL)) {
+            // ═══ HITUNG HPP (untuk Laba Bersih) ═══
+            val totalHpp = lines.sumOf { it.menu.hargaBeli * it.qty }
+
+            // ═══ NOMOR ANTRIAN ═══
+            val nomorAntrian = if (antrianEnabled) {
                 try { repo.nextNomorAntrian() } catch (_: Exception) { 0 }
             } else 0
 
@@ -348,7 +360,8 @@ class KasirViewModel(
                 memberNama = member?.nama ?: "",
                 poinDidapat = poinDidapat,
                 stokDipotong = false,
-                nomorAntrian = nomorAntrian
+                nomorAntrian = nomorAntrian,
+                totalHpp = totalHpp
             )
             val id: Long = if (existingId != null) {
                 repo.updateOrderWithItems(order, items); existingId
@@ -371,9 +384,7 @@ class KasirViewModel(
                 } catch (_: Exception) {}
             }
 
-            // 🔊 Bunyi sukses
             if (soundEnabled) SoundHelper.playSuccess()
-
             resetOrder()
             onDone(id)
         }
@@ -453,7 +464,10 @@ class RiwayatViewModel(
     suspend fun getOrder(id: Long) = repo.getOrder(id)
 }
 
-class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
+class DashboardViewModel(
+    private val repo: PosRepository,
+    private val expenseRepo: ExpenseRepository
+) : ViewModel() {
     private val startOfDay: Long = run {
         val c = java.util.Calendar.getInstance()
         c.set(java.util.Calendar.HOUR_OF_DAY, 0)
@@ -462,6 +476,8 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
         c.set(java.util.Calendar.MILLISECOND, 0)
         c.timeInMillis
     }
+    private val endOfDay: Long = startOfDay + 24L * 60 * 60 * 1000 - 1
+
     val transaksiHariIni: StateFlow<Int> = repo.countPaidSince(startOfDay)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val omzetHariIni: StateFlow<Int> = repo.sumPaidSince(startOfDay)
@@ -472,6 +488,13 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
     val transaksiTerakhir: StateFlow<List<Order>> = repo.observePaidSince(startOfDay)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val pengeluaranHariIni: StateFlow<Int> = expenseRepo.observeSumInRange(
+        startOfDay, endOfDay
+    ).stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
+    private val _hppHariIni = MutableStateFlow(0)
+    val hppHariIni: StateFlow<Int> = _hppHariIni.asStateFlow()
 
     private val _grafik = MutableStateFlow<List<HariPenjualan>>(emptyList())
     val grafik: StateFlow<List<HariPenjualan>> = _grafik.asStateFlow()
@@ -489,6 +512,10 @@ class DashboardViewModel(private val repo: PosRepository) : ViewModel() {
 
     fun loadExtras() {
         viewModelScope.launch {
+            try {
+                _hppHariIni.value = repo.sumHppInRange(startOfDay, System.currentTimeMillis())
+            } catch (_: Exception) { _hppHariIni.value = 0 }
+
             val cal = java.util.Calendar.getInstance()
             cal.set(java.util.Calendar.HOUR_OF_DAY, 0)
             cal.set(java.util.Calendar.MINUTE, 0)
@@ -530,7 +557,8 @@ class PosVMFactory(
     private val crmRepo: CrmRepository,
     private val stockRepo: StockRepository,
     private val kategoriRepo: KategoriRepository,
-    private val settingRepo: SettingRepository
+    private val settingRepo: SettingRepository,
+    private val expenseRepo: ExpenseRepository
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T = when {
@@ -541,7 +569,8 @@ class PosVMFactory(
         modelClass.isAssignableFrom(OpenBillViewModel::class.java) -> OpenBillViewModel(repo) as T
         modelClass.isAssignableFrom(RiwayatViewModel::class.java) ->
             RiwayatViewModel(repo, stockRepo) as T
-        modelClass.isAssignableFrom(DashboardViewModel::class.java) -> DashboardViewModel(repo) as T
+        modelClass.isAssignableFrom(DashboardViewModel::class.java) ->
+            DashboardViewModel(repo, expenseRepo) as T
         else -> error("VM tidak dikenal: ${modelClass.name}")
     }
 }
@@ -555,7 +584,10 @@ private fun activityOwner(): ComponentActivity =
 
 @Composable
 private fun posFactory(app: IyonzApp) = remember {
-    PosVMFactory(app.posRepo, app.crmRepo, app.stockRepo, app.kategoriRepo, app.settingRepo)
+    PosVMFactory(
+        app.posRepo, app.crmRepo, app.stockRepo,
+        app.kategoriRepo, app.settingRepo, app.expenseRepo
+    )
 }
 
 @Composable
@@ -563,7 +595,6 @@ fun PosRoute(app: IyonzApp, nav: NavHostController, innerNav: NavHostController)
     val factory = posFactory(app)
     val owner = activityOwner()
     val vm: KasirViewModel = viewModel(viewModelStoreOwner = owner, factory = factory)
-    // Refresh setting tiap POS dibuka
     LaunchedEffect(Unit) { vm.refreshSettings() }
     PosScreen(vm,
         onOpenKeranjang = { nav.navigate(Routes.KERANJANG) },
@@ -616,7 +647,6 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
             }
         })
 
-    // ═══ SUCCESS SCREEN (Full Page) ═══
     if (showSuccess && postOrder != null) {
         SuccessScreen(
             order = postOrder!!,
@@ -645,7 +675,6 @@ fun BayarRoute(app: IyonzApp, nav: NavHostController) {
             },
             onNewTransaction = {
                 showSuccess = false
-                // Balik ke POS + reset cart
                 nav.popBackStack(Routes.MAIN, inclusive = false)
             },
             onDone = {
@@ -721,6 +750,8 @@ fun DashboardRoute(app: IyonzApp) {
     val vm: DashboardViewModel = viewModel(factory = factory)
     DashboardScreen(vm)
 }
+
+
 // ═══════════════════════════════════════════════════════════
 // POS SCREEN
 // ═══════════════════════════════════════════════════════════
@@ -770,7 +801,6 @@ fun PosScreen(vm: KasirViewModel, onOpenKeranjang: () -> Unit, onBayar: () -> Un
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolean) {
-    val ctx = LocalContext.current
     var showBarcode by remember { mutableStateOf(false) }
     val barcodeEnabled = FeatureManager.isEnabled(FeatureKey.BARCODE)
 
@@ -794,8 +824,7 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                         Text(
                             if (vm.nomorMeja.isBlank()) "Belum pilih meja"
                             else "Meja " + vm.nomorMeja,
-                            style = MaterialTheme.typography.bodySmall
-                        )
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 },
                 actions = {
@@ -817,8 +846,7 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
 
             OutlinedTextField(
                 value = vm.searchQuery, onValueChange = { vm.searchQuery = it },
-                placeholder = { Text("Cari menu",
-                    style = MaterialTheme.typography.bodySmall) },
+                placeholder = { Text("Cari menu", style = MaterialTheme.typography.bodySmall) },
                 leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                 trailingIcon = {
                     if (vm.searchQuery.isNotEmpty()) {
@@ -830,10 +858,8 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                 },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-                    .height(52.dp)
+                modifier = Modifier.fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 4.dp).height(52.dp)
             )
 
             vm.barcodeMessage?.let { msg ->
@@ -870,8 +896,7 @@ fun MenuPane(vm: KasirViewModel, modifier: Modifier = Modifier, isTablet: Boolea
                             onClick = { vm.kategoriFilter = k },
                             label = { Text(k ?: "Semua",
                                 style = MaterialTheme.typography.bodySmall) },
-                            modifier = Modifier.height(32.dp)
-                        )
+                            modifier = Modifier.height(32.dp))
                     }
                 }
             }
@@ -1082,7 +1107,6 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                         onEditNote = { noteFor = line },
                         showNote = modifierEnabled)
                 }
-
                 item {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.fillMaxWidth()) {
@@ -1090,31 +1114,27 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                             OutlinedButton(
                                 onClick = { showDiskon = true },
                                 modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 8.dp)
-                            ) {
+                                contentPadding = PaddingValues(vertical = 8.dp)) {
                                 Icon(Icons.Default.LocalOffer, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text(
                                     if (vm.diskonTipe == "NONE") "Diskon"
                                     else if (vm.diskonTipe == "PERSEN") "Disc ${vm.diskonValue}%"
                                     else "Disc ${vm.diskonValue.rupiah()}",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                    style = MaterialTheme.typography.bodySmall)
                             }
                         }
                         if (pajakEnabled) {
                             OutlinedButton(
                                 onClick = { showPajak = true },
                                 modifier = Modifier.weight(1f),
-                                contentPadding = PaddingValues(vertical = 8.dp)
-                            ) {
+                                contentPadding = PaddingValues(vertical = 8.dp)) {
                                 Icon(Icons.Default.Receipt, null, Modifier.size(16.dp))
                                 Spacer(Modifier.width(4.dp))
                                 Text(
                                     if (vm.pajakPersen == 0) "Pajak"
                                     else "PPN ${vm.pajakPersen}%",
-                                    style = MaterialTheme.typography.bodySmall
-                                )
+                                    style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
@@ -1201,8 +1221,7 @@ fun CartPane(vm: KasirViewModel, modifier: Modifier = Modifier, onBayar: () -> U
                 vm.remove(line.key)
                 repeat(oldQty) { vm.add(line.menu, newNote) }
                 noteFor = null
-            }
-        )
+            })
     }
     if (showDiskon) DiskonDialog(vm, subtotal) { showDiskon = false }
     if (showPajak) PajakDialog(vm) { showPajak = false }
@@ -1220,7 +1239,6 @@ private fun DiskonDialog(vm: KasirViewModel, subtotal: Int, onDismiss: () -> Uni
         "PERSEN" -> subtotal * value.coerceIn(0, 100) / 100
         else -> 0
     }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Atur Diskon") },
@@ -1278,10 +1296,7 @@ private fun DiskonDialog(vm: KasirViewModel, subtotal: Int, onDismiss: () -> Uni
                 onDismiss()
             }) { Text("Simpan") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal") }
-        }
-    )
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
 @Composable
@@ -1305,8 +1320,7 @@ private fun PajakDialog(vm: KasirViewModel, onDismiss: () -> Unit) {
                         AssistChip(
                             onClick = { valueText = if (p == 0) "" else p.toString() },
                             label = { Text(if (p == 0) "Tanpa PPN" else "$p%",
-                                style = MaterialTheme.typography.bodySmall) }
-                        )
+                                style = MaterialTheme.typography.bodySmall) })
                     }
                 }
                 Text("Pajak dihitung dari harga setelah diskon.",
@@ -1319,10 +1333,7 @@ private fun PajakDialog(vm: KasirViewModel, onDismiss: () -> Unit) {
                 vm.pajakPersen = value.coerceIn(0, 100); onDismiss()
             }) { Text("Simpan") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal") }
-        }
-    )
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
 @Composable
@@ -1404,10 +1415,7 @@ private fun NoteDialog(
         confirmButton = {
             TextButton(onClick = { onSave(text.trim()) }) { Text("Simpan") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal") }
-        }
-    )
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1428,7 +1436,7 @@ fun KeranjangScreen(vm: KasirViewModel, onBack: () -> Unit, onBayar: () -> Unit)
 }
 
 // ═══════════════════════════════════════════════════════════
-// BAYAR — dengan filter metode
+// BAYAR
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1438,7 +1446,6 @@ fun BayarScreen(
     onSelesai: (Long) -> Unit
 ) {
     val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
     val subtotal by vm.subtotal.collectAsState()
     val diskonAmount = vm.hitungDiskon(subtotal)
     val afterDiskon = (subtotal - diskonAmount).coerceAtLeast(0)
@@ -1462,7 +1469,6 @@ fun BayarScreen(
             FeatureManager.isEnabled(FeatureKey.HUTANG_PELANGGAN)
     val voucherEnabled = FeatureManager.isEnabled(FeatureKey.VOUCHER)
 
-    // Filter metode berdasarkan setting (kalau kosong = semua)
     val activeMethods = remember(vm.metodeAktif, vm.selectedMember) {
         val base = if (vm.metodeAktif.isEmpty()) PaymentMethod.values().toList()
         else PaymentMethod.values().filter { it.id in vm.metodeAktif }
@@ -1470,7 +1476,6 @@ fun BayarScreen(
         else base
     }
 
-    // Auto-set metode ke pertama kalau current nggak tersedia
     LaunchedEffect(activeMethods) {
         if (activeMethods.none { it.id == metode } && activeMethods.isNotEmpty()) {
             metode = activeMethods.first().id
@@ -1549,14 +1554,12 @@ fun BayarScreen(
                                 singleLine = true,
                                 textStyle = MaterialTheme.typography.bodyMedium,
                                 isError = vm.voucherError != null,
-                                modifier = Modifier.weight(1f)
-                            )
+                                modifier = Modifier.weight(1f))
                             Spacer(Modifier.width(8.dp))
                             if (vm.voucherKode.isBlank()) {
                                 Button(
                                     onClick = { vm.applyVoucher(voucherInput, subtotal) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = BRAND),
+                                    colors = ButtonDefaults.buttonColors(containerColor = BRAND),
                                     enabled = voucherInput.isNotBlank()
                                 ) { Text("Pakai") }
                             } else {
@@ -1648,8 +1651,7 @@ fun BayarScreen(
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
                 QuickCash(total) { dibayarText = it.toString() }
                 Row {
-                    Text("Kembalian", Modifier.weight(1f),
-                        fontWeight = FontWeight.SemiBold)
+                    Text("Kembalian", Modifier.weight(1f), fontWeight = FontWeight.SemiBold)
                     Text(kembalian.rupiah(), fontWeight = FontWeight.Bold, color = BRAND)
                 }
             }
@@ -1673,8 +1675,7 @@ fun BayarScreen(
         MemberPickerDialog(
             crmRepo = (ctx.applicationContext as IyonzApp).crmRepo,
             onDismiss = { showMemberPicker = false },
-            onPick = { m -> vm.setMember(m); showMemberPicker = false }
-        )
+            onPick = { m -> vm.setMember(m); showMemberPicker = false })
     }
 
     if (showPoinDialog && vm.selectedMember != null) {
@@ -1683,11 +1684,9 @@ fun BayarScreen(
             currentPoin = vm.poinDipakai,
             maxPoin = minOf(
                 vm.selectedMember!!.poin,
-                LoyaltyConfig.rupiahKePoin(afterVoucher)
-            ),
+                LoyaltyConfig.rupiahKePoin(afterVoucher)),
             onDismiss = { showPoinDialog = false },
-            onConfirm = { p -> vm.poinDipakai = p; showPoinDialog = false }
-        )
+            onConfirm = { p -> vm.poinDipakai = p; showPoinDialog = false })
     }
 }
 
@@ -1748,16 +1747,13 @@ private fun MemberPickerDialog(
                     value = search, onValueChange = { search = it },
                     placeholder = { Text("Cari nama / telepon...",
                         style = MaterialTheme.typography.bodySmall) },
-                    leadingIcon = { Icon(Icons.Default.Search, null,
-                        Modifier.size(18.dp)) },
+                    leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth().height(52.dp)
-                )
+                    modifier = Modifier.fillMaxWidth().height(52.dp))
                 OutlinedButton(
                     onClick = { showAddMember = true },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                    modifier = Modifier.fillMaxWidth()) {
                     Icon(Icons.Default.PersonAdd, null, Modifier.size(16.dp))
                     Spacer(Modifier.width(6.dp))
                     Text("Member Baru")
@@ -1786,15 +1782,12 @@ private fun MemberPickerDialog(
                                     Column(Modifier.weight(1f)) {
                                         Text(m.nama, fontWeight = FontWeight.SemiBold,
                                             style = MaterialTheme.typography.bodyMedium)
-                                        Text(
-                                            buildString {
-                                                if (m.telepon.isNotBlank())
-                                                    append("${m.telepon} • ")
-                                                append("⭐ ${m.poin}")
-                                            },
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
+                                        Text(buildString {
+                                            if (m.telepon.isNotBlank())
+                                                append("${m.telepon} • ")
+                                            append("⭐ ${m.poin}")
+                                        }, style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
@@ -1803,11 +1796,7 @@ private fun MemberPickerDialog(
                 }
             }
         },
-        confirmButton = {
-            TextButton(onClick = onDismiss) { Text("Tutup") }
-        }
-    )
-
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
     if (showAddMember) {
         MemberQuickAddDialog(
             onDismiss = { showAddMember = false },
@@ -1816,8 +1805,7 @@ private fun MemberPickerDialog(
                     crmRepo.saveMember(newMember)
                     showAddMember = false
                 }
-            }
-        )
+            })
     }
 }
 
@@ -1829,7 +1817,6 @@ private fun MemberQuickAddDialog(
     var nama by remember { mutableStateOf("") }
     var telepon by remember { mutableStateOf("") }
     var err by remember { mutableStateOf<String?>(null) }
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Member Baru") },
@@ -1853,10 +1840,7 @@ private fun MemberQuickAddDialog(
                 onSave(Member(nama = nama.trim(), telepon = telepon.trim()))
             }) { Text("Simpan") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal") }
-        }
-    )
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
 @Composable
@@ -1869,7 +1853,6 @@ private fun PoinPakaiDialog(
     }
     val poin = poinText.toIntOrNull() ?: 0
     val rupiah = LoyaltyConfig.poinKeRupiah(poin)
-
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Tukar Poin") },
@@ -1894,13 +1877,11 @@ private fun PoinPakaiDialog(
                         AssistChip(
                             onClick = { poinText = if (p == 0) "" else p.toString() },
                             label = { Text(if (p == 0) "Nol" else "$p",
-                                style = MaterialTheme.typography.bodySmall) }
-                        )
+                                style = MaterialTheme.typography.bodySmall) })
                     }
                 }
                 if (poin > 0) {
-                    Card(colors = CardDefaults.cardColors(
-                        containerColor = BRAND_LIGHT)) {
+                    Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                         Column(Modifier.padding(10.dp)) {
                             Text("Diskon poin: ${rupiah.rupiah()}",
                                 fontWeight = FontWeight.Bold, color = BRAND)
@@ -1915,10 +1896,7 @@ private fun PoinPakaiDialog(
                 enabled = poin <= maxPoin
             ) { Text("Pakai") }
         },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Batal") }
-        }
-    )
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1969,12 +1947,9 @@ fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
                                     color = BRAND)
                                 Spacer(Modifier.height(6.dp))
                                 Button(onClick = { onPick(o.id) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = BRAND),
-                                    contentPadding = PaddingValues(
-                                        horizontal = 12.dp, vertical = 4.dp)) {
-                                    Text("Bayar",
-                                        style = MaterialTheme.typography.bodySmall)
+                                    colors = ButtonDefaults.buttonColors(containerColor = BRAND),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                                    Text("Bayar", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
@@ -1993,7 +1968,6 @@ fun OpenBillScreen(vm: OpenBillViewModel, onPick: (Long) -> Unit) {
 fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
     val menu by vm.menu.collectAsState()
     val canEdit = Session.can(PermissionKey.KELOLA_MENU)
-
     Scaffold(
         topBar = { TopAppBar(title = { Text("Kelola Menu") }) },
         floatingActionButton = {
@@ -2002,8 +1976,7 @@ fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
                     onClick = { onEdit(null) },
                     icon = { Icon(Icons.Default.Add, null) },
                     text = { Text("Menu baru") },
-                    containerColor = BRAND
-                )
+                    containerColor = BRAND)
             }
         }
     ) { pad ->
@@ -2016,8 +1989,7 @@ fun MenuScreen(vm: MenuViewModel, onEdit: (Long?) -> Unit) {
                 contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, 100.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(menu, key = { it.id }) { m ->
-                    MenuRow(m,
-                        onToggle = { vm.toggle(m) },
+                    MenuRow(m, onToggle = { vm.toggle(m) },
                         onEdit = { if (canEdit) onEdit(m.id) },
                         onDelete = { if (canEdit) vm.delete(m) },
                         canEdit = canEdit)
@@ -2068,13 +2040,11 @@ private fun MenuRow(
                     }
                 }
                 Text(m.harga.rupiah(), color = BRAND)
-                Text(
-                    m.kategori + if (m.barcode.isNotBlank()) " • 🔖" else "",
+                Text(m.kategori + if (m.barcode.isNotBlank()) " • 🔖" else "",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(checked = m.tersedia, onCheckedChange = { onToggle() },
-                enabled = canEdit)
+            Switch(checked = m.tersedia, onCheckedChange = { onToggle() }, enabled = canEdit)
             if (canEdit) {
                 IconButton(onClick = onEdit) { Icon(Icons.Default.Edit, null) }
                 IconButton(onClick = onDelete) { Icon(Icons.Default.Delete, null) }
@@ -2083,9 +2053,6 @@ private fun MenuRow(
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// EDIT MENU — FIX tombol Simpan disabled!
-// ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
@@ -2102,11 +2069,9 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     var originalPhotoUri by remember { mutableStateOf<String?>(null) }
     var tersedia by remember { mutableStateOf(true) }
     var barcode by remember { mutableStateOf("") }
-
     var trackStok by remember { mutableStateOf(false) }
     var stokText by remember { mutableStateOf("0") }
     var stokMinimalText by remember { mutableStateOf("5") }
-
     var loaded by remember { mutableStateOf(menuId == null) }
     var showKategoriDropdown by remember { mutableStateOf(false) }
     var showBarcodeScan by remember { mutableStateOf(false) }
@@ -2114,12 +2079,9 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
     var saving by remember { mutableStateOf(false) }
 
     val barcodeEnabled = FeatureManager.isEnabled(FeatureKey.BARCODE)
-
-    // ═══ VALIDASI FORM ═══
     val harga = hargaText.toIntOrNull() ?: 0
     val formValid = nama.isNotBlank() && harga > 0
     val formError = when {
-        nama.isBlank() && hargaText.isNotBlank() -> "Nama menu wajib diisi"
         nama.isBlank() -> "Nama menu wajib diisi"
         hargaText.isBlank() -> "Harga jual wajib diisi"
         harga <= 0 -> "Harga harus lebih dari 0"
@@ -2131,8 +2093,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
             vm.get(menuId)?.let {
                 nama = it.nama; hargaText = it.harga.toString()
                 hargaBeliText = if (it.hargaBeli > 0) it.hargaBeli.toString() else ""
-                kategoriNama = it.kategori
-                kategoriId = it.kategoriId
+                kategoriNama = it.kategori; kategoriId = it.kategoriId
                 fotoUri = it.fotoUri; tersedia = it.tersedia
                 originalPhotoUri = it.fotoUri
                 trackStok = it.trackStok
@@ -2190,42 +2151,31 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     label = { Text("Nama menu *") },
                     isError = nama.isBlank() && hargaText.isNotBlank(),
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
-
                 Box {
                     OutlinedTextField(
-                        value = kategoriNama,
-                        onValueChange = {},
-                        readOnly = true,
+                        value = kategoriNama, onValueChange = {}, readOnly = true,
                         label = { Text("Kategori") },
                         trailingIcon = {
                             IconButton(onClick = { showKategoriDropdown = true }) {
                                 Icon(Icons.Default.ArrowDropDown, null)
                             }
                         },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Box(Modifier.matchParentSize().clickable {
-                        showKategoriDropdown = true
-                    })
+                        modifier = Modifier.fillMaxWidth())
+                    Box(Modifier.matchParentSize().clickable { showKategoriDropdown = true })
                 }
-                DropdownMenu(
-                    expanded = showKategoriDropdown,
-                    onDismissRequest = { showKategoriDropdown = false }
-                ) {
+                DropdownMenu(expanded = showKategoriDropdown,
+                    onDismissRequest = { showKategoriDropdown = false }) {
                     if (kategoriList.isEmpty()) {
                         DropdownMenuItem(
                             text = { Text("Belum ada kategori — bikin dulu di Setelan") },
-                            onClick = { showKategoriDropdown = false }
-                        )
+                            onClick = { showKategoriDropdown = false })
                     } else {
                         kategoriList.forEach { k ->
                             DropdownMenuItem(
                                 text = {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Box(
-                                            Modifier.size(14.dp).clip(CircleShape)
-                                                .background(k.warnaHex.toColorSafe(BRAND))
-                                        )
+                                        Box(Modifier.size(14.dp).clip(CircleShape)
+                                            .background(k.warnaHex.toColorSafe(BRAND)))
                                         Spacer(Modifier.width(8.dp))
                                         Text(k.nama)
                                     }
@@ -2234,12 +2184,10 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                                     kategoriNama = k.nama
                                     kategoriId = k.id
                                     showKategoriDropdown = false
-                                }
-                            )
+                                })
                         }
                     }
                 }
-
                 OutlinedTextField(hargaText,
                     { hargaText = it.filter { c -> c.isDigit() } },
                     label = { Text("Harga jual *") },
@@ -2255,11 +2203,9 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                     modifier = Modifier.fillMaxWidth(), singleLine = true)
 
                 if (barcodeEnabled) {
-                    Row(
-                        Modifier.fillMaxWidth(),
+                    Row(Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                        verticalAlignment = Alignment.CenterVertically) {
                         OutlinedTextField(
                             value = barcode,
                             onValueChange = {
@@ -2270,15 +2216,11 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                             placeholder = { Text("Scan atau ketik manual") },
                             singleLine = true,
                             isError = barcodeError != null,
-                            modifier = Modifier.weight(1f)
-                        )
+                            modifier = Modifier.weight(1f))
                         IconButton(
                             onClick = { showBarcodeScan = true },
-                            modifier = Modifier
-                                .size(52.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(BRAND)
-                        ) {
+                            modifier = Modifier.size(52.dp).clip(RoundedCornerShape(8.dp))
+                                .background(BRAND)) {
                             Icon(Icons.Default.QrCodeScanner, null, tint = Color.White)
                         }
                     }
@@ -2295,8 +2237,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Switch(checked = trackStok,
-                                onCheckedChange = { trackStok = it })
+                            Switch(checked = trackStok, onCheckedChange = { trackStok = it })
                         }
                         if (trackStok) {
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2308,9 +2249,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                                     label = { Text("Stok") },
                                     keyboardOptions = KeyboardOptions(
                                         keyboardType = KeyboardType.Number),
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                    singleLine = true, modifier = Modifier.weight(1f))
                                 OutlinedTextField(
                                     value = stokMinimalText,
                                     onValueChange = {
@@ -2319,34 +2258,28 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                                     label = { Text("Stok min") },
                                     keyboardOptions = KeyboardOptions(
                                         keyboardType = KeyboardType.Number),
-                                    singleLine = true,
-                                    modifier = Modifier.weight(1f)
-                                )
+                                    singleLine = true, modifier = Modifier.weight(1f))
                             }
                         }
                     }
                 }
-
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Tersedia", Modifier.weight(1f))
                     Switch(checked = tersedia, onCheckedChange = { tersedia = it })
                 }
 
-                // Error banner
                 formError?.let {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
+                        modifier = Modifier.fillMaxWidth()) {
                         Row(Modifier.padding(10.dp),
                             verticalAlignment = Alignment.CenterVertically) {
                             Icon(Icons.Default.Info, null,
                                 tint = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text(it,
-                                style = MaterialTheme.typography.bodySmall,
+                            Text(it, style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onErrorContainer)
                         }
                     }
@@ -2355,9 +2288,7 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                 Spacer(Modifier.height(8.dp))
                 Button(
                     onClick = {
-                        // Validasi ulang sebelum save
-                        if (!formValid) return@Button
-                        if (saving) return@Button
+                        if (!formValid || saving) return@Button
                         saving = true
                         val hargaBeli = hargaBeliText.toIntOrNull() ?: 0
                         val stok = if (trackStok) stokText.toIntOrNull() ?: 0 else 0
@@ -2374,18 +2305,15 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
                             kategori = kategoriNama.trim().ifBlank { "Umum" },
                             kategoriId = kategoriId,
                             fotoUri = fotoUri, tersedia = tersedia,
-                            trackStok = trackStok,
-                            stok = stok,
-                            stokMinimal = stokMin,
-                            barcode = barcode.trim()
+                            trackStok = trackStok, stok = stok,
+                            stokMinimal = stokMin, barcode = barcode.trim()
                         )) { onBack() }
                     },
                     enabled = formValid && !saving,
                     modifier = Modifier.fillMaxWidth().height(52.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = BRAND,
-                        disabledContainerColor = BRAND.copy(alpha = 0.4f)
-                    )
+                        disabledContainerColor = BRAND.copy(alpha = 0.4f))
                 ) {
                     if (saving) {
                         CircularProgressIndicator(Modifier.size(20.dp),
@@ -2404,12 +2332,9 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
             title = "Scan Barcode Produk",
             hintText = "Arahkan kamera ke barcode produk",
             onResult = { code ->
-                barcode = code
-                barcodeError = null
-                showBarcodeScan = false
+                barcode = code; barcodeError = null; showBarcodeScan = false
             },
-            onDismiss = { showBarcodeScan = false }
-        )
+            onDismiss = { showBarcodeScan = false })
     }
 }
 
@@ -2421,7 +2346,6 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
 fun RiwayatScreen(vm: RiwayatViewModel) {
     val orders by vm.orders.collectAsState()
     var selected by remember { mutableStateOf<Order?>(null) }
-
     Scaffold(topBar = { TopAppBar(title = { Text("Riwayat Transaksi") }) }) { pad ->
         if (orders.isEmpty()) {
             Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -2431,13 +2355,10 @@ fun RiwayatScreen(vm: RiwayatViewModel) {
             LazyColumn(Modifier.padding(pad).fillMaxSize(),
                 contentPadding = PaddingValues(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(orders, key = { it.id }) { o ->
-                    RiwayatCard(o) { selected = o }
-                }
+                items(orders, key = { it.id }) { o -> RiwayatCard(o) { selected = o } }
             }
         }
     }
-
     selected?.let { order ->
         OrderDetailDialog(order = order, vm = vm, onDismiss = { selected = null })
     }
@@ -2452,6 +2373,7 @@ private fun RiwayatCard(o: Order, onClick: () -> Unit) {
                 Column(Modifier.weight(1f)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(buildString {
+                            if (o.nomorAntrian > 0) append("#${o.nomorAntrian} • ")
                             if (o.nomorMeja.isNotBlank()) append("Meja ${o.nomorMeja} • ")
                             append(PaymentMethod.fromId(o.metodeBayar).label)
                         }, fontWeight = FontWeight.SemiBold)
@@ -2567,17 +2489,14 @@ private fun OrderDetailDialog(
                                     try {
                                         if (!PrinterService.isConnected()) {
                                             val mac = app.settingRepo.getPrinterMac()
-                                            if (mac.isNotBlank()) {
-                                                PrinterService.connect(ctx, mac)
-                                            }
+                                            if (mac.isNotBlank()) PrinterService.connect(ctx, mac)
                                         }
                                         cetakStruk(app.settingRepo, order, items)
                                     } catch (_: Exception) {}
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 8.dp)
-                        ) {
+                            contentPadding = PaddingValues(vertical = 8.dp)) {
                             Icon(Icons.Default.Print, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Cetak", style = MaterialTheme.typography.bodySmall)
@@ -2591,8 +2510,7 @@ private fun OrderDetailDialog(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(vertical = 8.dp)
-                    ) {
+                        contentPadding = PaddingValues(vertical = 8.dp)) {
                         Icon(Icons.Default.Receipt, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text("Preview", style = MaterialTheme.typography.bodySmall)
@@ -2606,8 +2524,7 @@ private fun OrderDetailDialog(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            contentPadding = PaddingValues(vertical = 8.dp)
-                        ) {
+                            contentPadding = PaddingValues(vertical = 8.dp)) {
                             Icon(Icons.Default.Share, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Share", style = MaterialTheme.typography.bodySmall)
@@ -2620,9 +2537,7 @@ private fun OrderDetailDialog(
                         OutlinedButton(
                             onClick = { showVoidDialog = true },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = DANGER)
-                        ) {
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = DANGER)) {
                             Icon(Icons.Default.Cancel, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Void", style = MaterialTheme.typography.bodySmall)
@@ -2630,9 +2545,7 @@ private fun OrderDetailDialog(
                         OutlinedButton(
                             onClick = { showRefundDialog = true },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = WARNING)
-                        ) {
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = WARNING)) {
                             Icon(Icons.Default.Replay, null, Modifier.size(16.dp))
                             Spacer(Modifier.width(4.dp))
                             Text("Refund", style = MaterialTheme.typography.bodySmall)
@@ -2641,9 +2554,7 @@ private fun OrderDetailDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } }
-    )
-
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Tutup") } })
     if (showPreview) {
         StrukPreviewDialog(
             strukText = strukText,
@@ -2668,8 +2579,7 @@ private fun OrderDetailDialog(
                     }
                 }
             } else null,
-            onDismiss = { showPreview = false }
-        )
+            onDismiss = { showPreview = false })
     }
     if (showVoidDialog) {
         AlasanDialog("Alasan Void",
@@ -2722,12 +2632,11 @@ private fun AlasanDialog(
             TextButton(onClick = { if (text.isNotBlank()) onConfirm(text.trim()) },
                 enabled = text.isNotBlank()) { Text("Konfirmasi", color = DANGER) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } }
-    )
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
 // ═══════════════════════════════════════════════════════════
-// DASHBOARD
+// DASHBOARD — dengan Laba Bersih
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2736,11 +2645,16 @@ fun DashboardScreen(vm: DashboardViewModel) {
     val omzet by vm.omzetHariIni.collectAsState()
     val diskon by vm.diskonHariIni.collectAsState()
     val pajak by vm.pajakHariIni.collectAsState()
+    val hpp by vm.hppHariIni.collectAsState()
+    val pengeluaran by vm.pengeluaranHariIni.collectAsState()
     val recent by vm.transaksiTerakhir.collectAsState()
     val grafik by vm.grafik.collectAsState()
     val topMenu by vm.topMenu.collectAsState()
     val topKategori by vm.topKategori.collectAsState()
     val metodeStat by vm.metodeStat.collectAsState()
+
+    val labaKotor = omzet - hpp
+    val labaBersih = labaKotor - pengeluaran
 
     Scaffold(topBar = { TopAppBar(title = { Text("Dashboard") }) }) { pad ->
         LazyColumn(Modifier.padding(pad).fillMaxSize(),
@@ -2751,6 +2665,8 @@ fun DashboardScreen(vm: DashboardViewModel) {
                 Text("Hari Ini", style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold)
             }
+
+            // ═══ STAT UTAMA ═══
             item {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     StatCard("Transaksi", trx.toString(),
@@ -2759,19 +2675,57 @@ fun DashboardScreen(vm: DashboardViewModel) {
                         Icons.Default.AttachMoney, Modifier.weight(1f))
                 }
             }
-            if (diskon > 0 || pajak > 0) {
-                item {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        if (diskon > 0)
-                            StatCard("Diskon", "- " + diskon.rupiah(),
-                                Icons.Default.LocalOffer, Modifier.weight(1f))
-                        if (pajak > 0)
-                            StatCard("PPN", pajak.rupiah(),
-                                Icons.Default.Receipt, Modifier.weight(1f))
+
+            // ═══ LABA BERSIH ═══
+            item {
+                Card(colors = CardDefaults.cardColors(
+                    containerColor = if (labaBersih >= 0) SUCCESS.copy(alpha = 0.12f)
+                    else DANGER.copy(alpha = 0.12f))) {
+                    Column(Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.TrendingUp, null,
+                                tint = if (labaBersih >= 0) SUCCESS else DANGER)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Laba Bersih Hari Ini",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
+                        }
+                        Text(labaBersih.rupiah(),
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = if (labaBersih >= 0) SUCCESS else DANGER)
+                        Text("Omzet − HPP − Pengeluaran",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
 
+            // ═══ RINCIAN ═══
+            item {
+                Card {
+                    Column(Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Rincian", fontWeight = FontWeight.SemiBold)
+                        RingkasLine("Omzet", omzet.rupiah())
+                        RingkasLine("HPP (Modal)", "- ${hpp.rupiah()}", DANGER)
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        RingkasLine("Laba Kotor", labaKotor.rupiah(), SUCCESS)
+                        RingkasLine("Pengeluaran", "- ${pengeluaran.rupiah()}", DANGER)
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                        RingkasLine("Laba Bersih", labaBersih.rupiah(),
+                            if (labaBersih >= 0) SUCCESS else DANGER)
+                        if (diskon > 0 || pajak > 0) {
+                            Spacer(Modifier.height(4.dp))
+                            if (diskon > 0) RingkasLine("Diskon", diskon.rupiah())
+                            if (pajak > 0) RingkasLine("PPN", pajak.rupiah())
+                        }
+                    }
+                }
+            }
+
+            // ═══ GRAFIK ═══
             if (FeatureManager.isEnabled(FeatureKey.GRAFIK)) {
                 item {
                     Card {
@@ -2847,6 +2801,21 @@ fun DashboardScreen(vm: DashboardViewModel) {
 }
 
 @Composable
+private fun RingkasLine(label: String, value: String,
+                         color: Color = Color.Unspecified) {
+    Row {
+        Text(label, Modifier.weight(1f),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface
+            else color)
+        Text(value, style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (color == Color.Unspecified) MaterialTheme.colorScheme.onSurface
+            else color)
+    }
+}
+
+@Composable
 private fun TopList(title: String, items: List<Triple<String, String, Int>>) {
     Card {
         Column(Modifier.padding(16.dp)) {
@@ -2901,7 +2870,6 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
     val barColor = BRAND
     val gridColor = MaterialTheme.colorScheme.outlineVariant
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
-
     Column {
         Canvas(Modifier.fillMaxWidth().height(160.dp)) {
             val paddingLeft = 8f
@@ -2913,8 +2881,7 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
                 val y = chartH * i / 3f
                 drawLine(color = gridColor,
                     start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = 1f)
+                    end = Offset(size.width, y), strokeWidth = 1f)
             }
             data.forEachIndexed { idx, item ->
                 val x = paddingLeft + idx * (barW + gap)
@@ -2936,8 +2903,7 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
         }
         Spacer(Modifier.height(8.dp))
         Text("Tertinggi: ${maxOmzet.rupiah()}",
-            style = MaterialTheme.typography.labelSmall,
-            color = labelColor)
+            style = MaterialTheme.typography.labelSmall, color = labelColor)
     }
 }
 
