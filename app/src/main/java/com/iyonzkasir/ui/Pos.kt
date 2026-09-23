@@ -1,5 +1,4 @@
 package com.iyonzkasir.ui
-
 import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -721,7 +720,8 @@ fun DashboardRoute(app: IyonzApp) {
     val factory = posFactory(app)
     val vm: DashboardViewModel = viewModel(factory = factory)
     DashboardScreen(vm)
-    // ═══════════════════════════════════════════════════════════
+}
+// ═══════════════════════════════════════════════════════════
 // POS SCREEN
 // ═══════════════════════════════════════════════════════════
 @Composable
@@ -2957,5 +2957,4 @@ private fun StatCard(
                 fontWeight = FontWeight.Bold, color = BRAND)
         }
     }
-}
 }
