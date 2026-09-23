@@ -45,7 +45,8 @@ import java.util.*
 enum class Periode(val id: String, val label: String) {
     HARI_INI("hari", "Hari Ini"),
     MINGGU("minggu", "7 Hari"),
-    BULAN("bulan", "30 Hari");
+    BULAN("bulan", "30 Hari"),
+    SEMUA("semua", "Semua");
 
     companion object {
         fun fromId(id: String) = values().firstOrNull { it.id == id } ?: HARI_INI
@@ -93,14 +94,15 @@ class LaporanViewModel(private val repo: PosRepository) : ViewModel() {
         cal.set(Calendar.MINUTE, 0)
         cal.set(Calendar.SECOND, 0)
         cal.set(Calendar.MILLISECOND, 0)
-        val endOfToday = cal.timeInMillis + 24L * 60 * 60 * 1000 - 1
+        val startToday = cal.timeInMillis
+        val endOfToday = startToday + 24L * 60 * 60 * 1000 - 1
 
-        when (p) {
-            Periode.HARI_INI -> cal.timeInMillis to endOfToday
-            Periode.MINGGU -> (cal.timeInMillis - 6L * 24 * 60 * 60 * 1000) to endOfToday
-            Periode.BULAN -> (cal.timeInMillis - 29L * 24 * 60 * 60 * 1000) to endOfToday
+        return when (p) {
+            Periode.HARI_INI -> startToday to endOfToday
+            Periode.MINGGU -> (startToday - 6L * 24 * 60 * 60 * 1000) to endOfToday
+            Periode.BULAN -> (startToday - 29L * 24 * 60 * 60 * 1000) to endOfToday
+            Periode.SEMUA -> 0L to endOfToday
         }
-        return cal.timeInMillis to endOfToday
     }
 
     fun load() {
