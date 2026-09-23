@@ -69,6 +69,32 @@ data class Kategori(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "expense_categories")
+data class ExpenseCategory(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val nama: String = "",
+    val iconName: String = "📝",
+    val warnaHex: String = "#FF6B35",
+    val urutan: Int = 0,
+    val isDefault: Boolean = false,
+    val aktif: Boolean = true,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "expenses")
+data class Expense(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val tanggal: Long = 0,
+    val kategoriId: Long = 0,
+    val kategoriNama: String = "",
+    val jumlah: Int = 0,
+    val keterangan: String = "",
+    val buktiFoto: String? = null,
+    val userId: String = "",
+    val userName: String = "",
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "menu_items")
 data class MenuItem(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
@@ -130,7 +156,8 @@ data class Order(
     val memberNama: String = "",
     val poinDidapat: Int = 0,
     val stokDipotong: Boolean = false,
-    val nomorAntrian: Int = 0
+    val nomorAntrian: Int = 0,
+    val totalHpp: Int = 0
 )
 
 @Entity(tableName = "order_items")
@@ -241,6 +268,21 @@ data class MetodeBayarStat(
     val metode: String, val totalTransaksi: Int, val totalOmzet: Int
 )
 
+data class ExpenseStat(
+    val kategoriId: Long, val kategoriNama: String,
+    val totalTransaksi: Int, val totalJumlah: Int
+)
+
+data class LabaBersih(
+    val omzet: Int = 0,
+    val hpp: Int = 0,
+    val pengeluaran: Int = 0
+) {
+    val labaKotor: Int get() = omzet - hpp
+    val labaBersih: Int get() = labaKotor - pengeluaran
+    val marginPersen: Int get() = if (omzet > 0) labaBersih * 100 / omzet else 0
+}
+
 // ═══════ DAOs ═══════
 
 @Dao
@@ -325,6 +367,70 @@ interface KategoriDao {
     suspend fun delete(k: Kategori)
     @Query("SELECT COALESCE(MAX(urutan), 0) FROM kategori")
     suspend fun maxUrutan(): Int
+}
+
+@Dao
+interface ExpenseCategoryDao {
+    @Query("SELECT * FROM expense_categories ORDER BY urutan ASC, nama ASC")
+    fun observeAll(): Flow<List<ExpenseCategory>>
+    @Query("SELECT * FROM expense_categories ORDER BY urutan ASC, nama ASC")
+    suspend fun getAll(): List<ExpenseCategory>
+    @Query("SELECT * FROM expense_categories WHERE id = :id")
+    suspend fun getById(id: Long): ExpenseCategory?
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(c: ExpenseCategory): Long
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertAll(items: List<ExpenseCategory>)
+    @Update
+    suspend fun update(c: ExpenseCategory)
+    @Delete
+    suspend fun delete(c: ExpenseCategory)
+    @Query("SELECT COUNT(*) FROM expense_categories")
+    suspend fun count(): Int
+    @Query("SELECT COALESCE(MAX(urutan), 0) FROM expense_categories")
+    suspend fun maxUrutan(): Int
+}
+
+@Dao
+interface ExpenseDao {
+    @Query("SELECT * FROM expenses ORDER BY tanggal DESC, id DESC")
+    fun observeAll(): Flow<List<Expense>>
+
+    @Query("SELECT * FROM expenses WHERE tanggal >= :start AND tanggal <= :end ORDER BY tanggal DESC")
+    fun observeInRange(start: Long, end: Long): Flow<List<Expense>>
+
+    @Query("SELECT * FROM expenses WHERE kategoriId = :kategoriId ORDER BY tanggal DESC")
+    fun observeByKategori(kategoriId: Long): Flow<List<Expense>>
+
+    @Query("SELECT * FROM expenses WHERE id = :id")
+    suspend fun getById(id: Long): Expense?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(e: Expense): Long
+
+    @Update
+    suspend fun update(e: Expense)
+
+    @Delete
+    suspend fun delete(e: Expense)
+
+    @Query("SELECT COALESCE(SUM(jumlah), 0) FROM expenses WHERE tanggal >= :start AND tanggal <= :end")
+    suspend fun sumInRange(start: Long, end: Long): Int
+
+    @Query("SELECT COALESCE(SUM(jumlah), 0) FROM expenses WHERE tanggal >= :start AND tanggal <= :end")
+    fun observeSumInRange(start: Long, end: Long): Flow<Int>
+
+    @Query("""
+        SELECT kategoriId AS kategoriId,
+               kategoriNama AS kategoriNama,
+               COUNT(*) AS totalTransaksi,
+               COALESCE(SUM(jumlah), 0) AS totalJumlah
+        FROM expenses
+        WHERE tanggal >= :start AND tanggal <= :end
+        GROUP BY kategoriId, kategoriNama
+        ORDER BY SUM(jumlah) DESC
+    """)
+    suspend fun statInRange(start: Long, end: Long): List<ExpenseStat>
 }
 
 @Dao
@@ -478,6 +584,15 @@ interface OrderDao {
 
     @Query("SELECT * FROM orders WHERE status = 'PAID' AND timestamp >= :start AND timestamp <= :end ORDER BY timestamp ASC")
     suspend fun ordersInRange(start: Long, end: Long): List<Order>
+
+    @Query("""
+        SELECT COALESCE(SUM(oi.qty * COALESCE(m.hargaBeli, 0)), 0)
+        FROM order_items oi
+        JOIN orders o ON o.id = oi.orderId
+        LEFT JOIN menu_items m ON m.id = oi.menuId
+        WHERE o.status = 'PAID' AND o.timestamp >= :start AND o.timestamp <= :end
+    """)
+    suspend fun sumHppInRange(start: Long, end: Long): Int
 }
 
 @Dao
@@ -672,16 +787,12 @@ val MIGRATION_6_7 = object : Migration(6, 7) {
 
 val MIGRATION_7_8 = object : Migration(7, 8) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // Menu stok fields
         db.execSQL("ALTER TABLE menu_items ADD COLUMN kategoriId INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE menu_items ADD COLUMN trackStok INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE menu_items ADD COLUMN stok INTEGER NOT NULL DEFAULT 0")
         db.execSQL("ALTER TABLE menu_items ADD COLUMN stokMinimal INTEGER NOT NULL DEFAULT 5")
-
-        // Order stok flag
         db.execSQL("ALTER TABLE orders ADD COLUMN stokDipotong INTEGER NOT NULL DEFAULT 0")
 
-        // Kategori table
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `kategori` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -693,7 +804,6 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
             )
         """.trimIndent())
 
-        // Stock movements table
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `stock_movements` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -715,10 +825,64 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
 
 val MIGRATION_8_9 = object : Migration(8, 9) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // Barcode field di menu
         db.execSQL("ALTER TABLE menu_items ADD COLUMN barcode TEXT NOT NULL DEFAULT ''")
-        // Nomor antrian di order
         db.execSQL("ALTER TABLE orders ADD COLUMN nomorAntrian INTEGER NOT NULL DEFAULT 0")
+    }
+}
+
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // Order: totalHpp
+        db.execSQL("ALTER TABLE orders ADD COLUMN totalHpp INTEGER NOT NULL DEFAULT 0")
+
+        // Expense categories
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `expense_categories` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `nama` TEXT NOT NULL DEFAULT '',
+                `iconName` TEXT NOT NULL DEFAULT '📝',
+                `warnaHex` TEXT NOT NULL DEFAULT '#FF6B35',
+                `urutan` INTEGER NOT NULL DEFAULT 0,
+                `isDefault` INTEGER NOT NULL DEFAULT 0,
+                `aktif` INTEGER NOT NULL DEFAULT 1,
+                `createdAt` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+
+        // Expenses
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `expenses` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `tanggal` INTEGER NOT NULL DEFAULT 0,
+                `kategoriId` INTEGER NOT NULL DEFAULT 0,
+                `kategoriNama` TEXT NOT NULL DEFAULT '',
+                `jumlah` INTEGER NOT NULL DEFAULT 0,
+                `keterangan` TEXT NOT NULL DEFAULT '',
+                `buktiFoto` TEXT,
+                `userId` TEXT NOT NULL DEFAULT '',
+                `userName` TEXT NOT NULL DEFAULT '',
+                `createdAt` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+
+        // Seed default kategori pengeluaran
+        val defaults = listOf(
+            Triple("Bahan Baku", "📦", "#43A047"),
+            Triple("Gaji Karyawan", "👥", "#1E88E5"),
+            Triple("Sewa Tempat", "🏠", "#8E24AA"),
+            Triple("Listrik & Air", "💡", "#FDD835"),
+            Triple("Transport", "🚗", "#FB8C00"),
+            Triple("Peralatan", "🔧", "#546E7A"),
+            Triple("Konsumsi", "🍔", "#E53935"),
+            Triple("Pulsa & Internet", "📱", "#00897B"),
+            Triple("Lain-lain", "📝", "#6D4C41")
+        )
+        defaults.forEachIndexed { idx, (nama, icon, warna) ->
+            db.execSQL(
+                "INSERT INTO expense_categories (nama, iconName, warnaHex, urutan, isDefault) VALUES (?, ?, ?, ?, 1)",
+                arrayOf<Any>(nama, icon, warna, idx)
+            )
+        }
     }
 }
 
@@ -727,11 +891,12 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
 @Database(
     entities = [
         User::class, UserPermission::class, AuditLog::class, AppSetting::class,
-        FeatureToggleEntity::class, Kategori::class, MenuItem::class,
-        StockMovement::class, Order::class, OrderItem::class, Shift::class,
-        Member::class, Voucher::class, MemberTransaction::class
+        FeatureToggleEntity::class, Kategori::class, ExpenseCategory::class,
+        Expense::class, MenuItem::class, StockMovement::class, Order::class,
+        OrderItem::class, Shift::class, Member::class, Voucher::class,
+        MemberTransaction::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -741,6 +906,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun settingDao(): SettingDao
     abstract fun featureDao(): FeatureDao
     abstract fun kategoriDao(): KategoriDao
+    abstract fun expenseCategoryDao(): ExpenseCategoryDao
+    abstract fun expenseDao(): ExpenseDao
     abstract fun menuDao(): MenuDao
     abstract fun stockDao(): StockDao
     abstract fun orderDao(): OrderDao
@@ -760,7 +927,7 @@ abstract class AppDatabase : RoomDatabase() {
                 ).addMigrations(
                     MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                     MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
-                    MIGRATION_8_9
+                    MIGRATION_8_9, MIGRATION_9_10
                 ).build().also { INSTANCE = it }
             }
     }
@@ -830,7 +997,10 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getThemeMode() = ThemeMode.fromId(get(KEY_TEMA_MODE, "system"))
     suspend fun setThemeMode(m: ThemeMode) = set(KEY_TEMA_MODE, m.id)
 
-    // Printer
+    // ═══ APP THEME (warna brand) ═══
+    suspend fun getAppTheme() = AppTheme.fromId(get(KEY_APP_THEME, "orange"))
+    suspend fun setAppTheme(t: AppTheme) = set(KEY_APP_THEME, t.id)
+
     suspend fun getPrinterMac() = get(KEY_PRINTER_MAC, "")
     suspend fun setPrinterMac(mac: String) = set(KEY_PRINTER_MAC, mac)
     suspend fun getPrinterNama() = get(KEY_PRINTER_NAMA, "")
@@ -840,22 +1010,18 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun isAutoPrint() = get(KEY_AUTO_PRINT, "0") == "1"
     suspend fun setAutoPrint(v: Boolean) = set(KEY_AUTO_PRINT, if (v) "1" else "0")
 
-    // Backup
     suspend fun getLastBackupTimestamp() =
         get(KEY_LAST_BACKUP, "0").toLongOrNull() ?: 0L
     suspend fun setLastBackupTimestamp(ts: Long) = set(KEY_LAST_BACKUP, ts.toString())
     suspend fun getLastBackupName() = get(KEY_LAST_BACKUP_NAME, "")
     suspend fun setLastBackupName(name: String) = set(KEY_LAST_BACKUP_NAME, name)
 
-    // Pajak default
     suspend fun getPajakDefault() = get(KEY_PAJAK_DEFAULT, "0").toIntOrNull() ?: 0
     suspend fun setPajakDefault(v: Int) = set(KEY_PAJAK_DEFAULT, v.toString())
 
-    // Suara
     suspend fun isSoundEnabled() = get(KEY_SOUND_ENABLED, "1") == "1"
     suspend fun setSoundEnabled(v: Boolean) = set(KEY_SOUND_ENABLED, if (v) "1" else "0")
 
-    // Metode bayar aktif (comma separated, default semua)
     suspend fun getMetodeAktif(): Set<String> {
         val raw = get(KEY_METODE_AKTIF, "CASH,QRIS,DEBIT,EWALLET,TRANSFER,HUTANG")
         return raw.split(",").filter { it.isNotBlank() }.toSet()
@@ -863,11 +1029,32 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun setMetodeAktif(metode: Set<String>) =
         set(KEY_METODE_AKTIF, metode.joinToString(","))
 
-    // Nomor antrian
     suspend fun isAntrianEnabled() = get(KEY_ANTRIAN_ENABLED, "0") == "1"
     suspend fun setAntrianEnabled(v: Boolean) = set(KEY_ANTRIAN_ENABLED, if (v) "1" else "0")
     suspend fun getAntrianPrefix() = get(KEY_ANTRIAN_PREFIX, "")
     suspend fun setAntrianPrefix(v: String) = set(KEY_ANTRIAN_PREFIX, v)
+
+    // Template struk — toggle field
+    suspend fun isStrukShowKasir() = get(KEY_STRUK_KASIR, "1") == "1"
+    suspend fun setStrukShowKasir(v: Boolean) = set(KEY_STRUK_KASIR, if (v) "1" else "0")
+    suspend fun isStrukShowMeja() = get(KEY_STRUK_MEJA, "1") == "1"
+    suspend fun setStrukShowMeja(v: Boolean) = set(KEY_STRUK_MEJA, if (v) "1" else "0")
+    suspend fun isStrukShowPelanggan() = get(KEY_STRUK_PELANGGAN, "1") == "1"
+    suspend fun setStrukShowPelanggan(v: Boolean) = set(KEY_STRUK_PELANGGAN, if (v) "1" else "0")
+    suspend fun isStrukShowCatatan() = get(KEY_STRUK_CATATAN, "1") == "1"
+    suspend fun setStrukShowCatatan(v: Boolean) = set(KEY_STRUK_CATATAN, if (v) "1" else "0")
+    suspend fun isStrukShowAntrian() = get(KEY_STRUK_ANTRIAN, "1") == "1"
+    suspend fun setStrukShowAntrian(v: Boolean) = set(KEY_STRUK_ANTRIAN, if (v) "1" else "0")
+    suspend fun isStrukShowPoin() = get(KEY_STRUK_POIN, "1") == "1"
+    suspend fun setStrukShowPoin(v: Boolean) = set(KEY_STRUK_POIN, if (v) "1" else "0")
+    suspend fun isStrukShowAlamat() = get(KEY_STRUK_ALAMAT, "1") == "1"
+    suspend fun setStrukShowAlamat(v: Boolean) = set(KEY_STRUK_ALAMAT, if (v) "1" else "0")
+    suspend fun isStrukShowTelepon() = get(KEY_STRUK_TELEPON, "1") == "1"
+    suspend fun setStrukShowTelepon(v: Boolean) = set(KEY_STRUK_TELEPON, if (v) "1" else "0")
+
+    // Template struk — pilihan
+    suspend fun getStrukTemplate() = get(KEY_STRUK_TEMPLATE, "STANDAR")
+    suspend fun setStrukTemplate(v: String) = set(KEY_STRUK_TEMPLATE, v)
 
     companion object {
         const val KEY_NAMA_TOKO = "toko_nama"
@@ -878,6 +1065,7 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_BUSINESS_TYPE = "business_type"
         const val KEY_ONBOARDING_DONE = "onboarding_done"
         const val KEY_TEMA_MODE = "tema_mode"
+        const val KEY_APP_THEME = "app_theme"
         const val KEY_PRINTER_MAC = "printer_mac"
         const val KEY_PRINTER_NAMA = "printer_nama"
         const val KEY_PAPER_WIDTH = "paper_width"
@@ -889,6 +1077,15 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_METODE_AKTIF = "metode_aktif"
         const val KEY_ANTRIAN_ENABLED = "antrian_enabled"
         const val KEY_ANTRIAN_PREFIX = "antrian_prefix"
+        const val KEY_STRUK_KASIR = "struk_show_kasir"
+        const val KEY_STRUK_MEJA = "struk_show_meja"
+        const val KEY_STRUK_PELANGGAN = "struk_show_pelanggan"
+        const val KEY_STRUK_CATATAN = "struk_show_catatan"
+        const val KEY_STRUK_ANTRIAN = "struk_show_antrian"
+        const val KEY_STRUK_POIN = "struk_show_poin"
+        const val KEY_STRUK_ALAMAT = "struk_show_alamat"
+        const val KEY_STRUK_TELEPON = "struk_show_telepon"
+        const val KEY_STRUK_TEMPLATE = "struk_template"
     }
 }
 
@@ -942,6 +1139,36 @@ class KategoriRepository(private val dao: KategoriDao) {
     }
     suspend fun delete(k: Kategori) = dao.delete(k)
     suspend fun update(k: Kategori) = dao.update(k)
+}
+
+class ExpenseRepository(
+    private val categoryDao: ExpenseCategoryDao,
+    private val expenseDao: ExpenseDao
+) {
+    val categories: Flow<List<ExpenseCategory>> = categoryDao.observeAll()
+    val expenses: Flow<List<Expense>> = expenseDao.observeAll()
+
+    fun observeInRange(start: Long, end: Long) = expenseDao.observeInRange(start, end)
+    fun observeSumInRange(start: Long, end: Long) = expenseDao.observeSumInRange(start, end)
+
+    suspend fun getCategories() = categoryDao.getAll()
+    suspend fun getCategoryById(id: Long) = categoryDao.getById(id)
+    suspend fun saveCategory(c: ExpenseCategory): Long {
+        val id = if (c.id == 0L) {
+            val next = categoryDao.maxUrutan() + 1
+            categoryDao.upsert(c.copy(urutan = next))
+        } else categoryDao.upsert(c)
+        return id
+    }
+    suspend fun deleteCategory(c: ExpenseCategory) = categoryDao.delete(c)
+    suspend fun updateCategory(c: ExpenseCategory) = categoryDao.update(c)
+
+    suspend fun saveExpense(e: Expense): Long = expenseDao.upsert(e)
+    suspend fun deleteExpense(e: Expense) = expenseDao.delete(e)
+    suspend fun getExpenseById(id: Long) = expenseDao.getById(id)
+
+    suspend fun sumInRange(start: Long, end: Long) = expenseDao.sumInRange(start, end)
+    suspend fun statInRange(start: Long, end: Long) = expenseDao.statInRange(start, end)
 }
 
 class StockRepository(
@@ -1082,6 +1309,7 @@ class PosRepository(
     suspend fun metodeBayarStat(start: Long, end: Long, limit: Int = 5) =
         orderDao.metodeBayarStat(start, end, limit)
     suspend fun ordersInRange(start: Long, end: Long) = orderDao.ordersInRange(start, end)
+    suspend fun sumHppInRange(start: Long, end: Long) = orderDao.sumHppInRange(start, end)
 }
 
 class ShiftRepository(
