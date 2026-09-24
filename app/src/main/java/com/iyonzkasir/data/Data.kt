@@ -168,7 +168,10 @@ data class OrderItem(
     val namaMenu: String = "",
     val hargaSatuan: Int = 0,
     val qty: Int = 1,
-    val catatan: String = ""
+    val catatan: String = "",
+    val bundleId: Long = 0,
+    val bundleNama: String = "",
+    val pilihanJson: String = ""
 ) { val subtotal: Int get() = hargaSatuan * qty }
 
 @Entity(tableName = "shifts")
@@ -235,6 +238,48 @@ data class MemberTransaction(
     val saldoHutangSetelah: Int = 0,
     val keterangan: String = "",
     val timestamp: Long = System.currentTimeMillis()
+)
+
+// ═══════ PAKET BUNDLING ═══════
+
+@Entity(tableName = "menu_bundles")
+data class MenuBundle(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val nama: String = "",
+    val deskripsi: String = "",
+    val hargaBundle: Int = 0,
+    val kategoriId: Long = 0,
+    val fotoUri: String? = null,
+    val tipe: String = BundleTipe.FIXED.id,
+    val hargaAsli: Int = 0,
+    val tersedia: Boolean = true,
+    val aktif: Boolean = true,
+    val urutan: Int = 0,
+    val jamMulai: Int = 0,
+    val jamAkhir: Int = 0,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "menu_bundle_groups")
+data class MenuBundleGroup(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val bundleId: Long = 0,
+    val nama: String = "",
+    val minPilih: Int = 0,
+    val maxPilih: Int = 1,
+    val urutan: Int = 0,
+    val wajib: Boolean = true
+)
+
+@Entity(tableName = "menu_bundle_items")
+data class MenuBundleItem(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val groupId: Long = 0,
+    val menuId: Long = 0,
+    val qty: Int = 1,
+    val hargaExtra: Int = 0,
+    val isDefaultPick: Boolean = false,
+    val urutan: Int = 0
 )
 
 // ═══════ LAPORAN DATA CLASS ═══════
@@ -666,6 +711,56 @@ interface MemberTxDao {
     suspend fun statForMember(memberId: Long): MemberStat?
 }
 
+// ═══════ BUNDLE DAO ═══════
+
+@Dao
+interface MenuBundleDao {
+    @Query("SELECT * FROM menu_bundles WHERE aktif = 1 ORDER BY urutan ASC, nama ASC")
+    fun observeAll(): Flow<List<MenuBundle>>
+
+    @Query("SELECT * FROM menu_bundles WHERE aktif = 1 ORDER BY urutan ASC, nama ASC")
+    suspend fun getAll(): List<MenuBundle>
+
+    @Query("SELECT * FROM menu_bundles WHERE id = :id")
+    suspend fun getById(id: Long): MenuBundle?
+
+    @Query("SELECT COALESCE(MAX(urutan), 0) FROM menu_bundles")
+    suspend fun maxUrutan(): Int
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(b: MenuBundle): Long
+
+    @Delete
+    suspend fun delete(b: MenuBundle)
+
+    @Query("SELECT * FROM menu_bundle_groups WHERE bundleId = :bundleId ORDER BY urutan ASC, id ASC")
+    suspend fun groupsOf(bundleId: Long): List<MenuBundleGroup>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertGroup(g: MenuBundleGroup): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertGroups(groups: List<MenuBundleGroup>)
+
+    @Query("DELETE FROM menu_bundle_groups WHERE bundleId = :bundleId")
+    suspend fun deleteGroups(bundleId: Long)
+
+    @Query("SELECT * FROM menu_bundle_items WHERE groupId = :groupId ORDER BY urutan ASC, id ASC")
+    suspend fun itemsOf(groupId: Long): List<MenuBundleItem>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertItem(item: MenuBundleItem): Long
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertItems(items: List<MenuBundleItem>)
+
+    @Query("DELETE FROM menu_bundle_items WHERE groupId = :groupId")
+    suspend fun deleteItemsOf(groupId: Long)
+
+    @Query("DELETE FROM menu_bundle_items WHERE groupId IN (SELECT id FROM menu_bundle_groups WHERE bundleId = :bundleId)")
+    suspend fun deleteAllItemsOf(bundleId: Long)
+}
+
 // ═══════ MIGRATIONS ═══════
 
 val MIGRATION_2_3 = object : Migration(2, 3) {
@@ -832,10 +927,8 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
 
 val MIGRATION_9_10 = object : Migration(9, 10) {
     override fun migrate(db: SupportSQLiteDatabase) {
-        // Order: totalHpp
         db.execSQL("ALTER TABLE orders ADD COLUMN totalHpp INTEGER NOT NULL DEFAULT 0")
 
-        // Expense categories
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `expense_categories` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -849,7 +942,6 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
             )
         """.trimIndent())
 
-        // Expenses
         db.execSQL("""
             CREATE TABLE IF NOT EXISTS `expenses` (
                 `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
@@ -865,7 +957,6 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
             )
         """.trimIndent())
 
-        // Seed default kategori pengeluaran
         val defaults = listOf(
             Triple("Bahan Baku", "📦", "#43A047"),
             Triple("Gaji Karyawan", "👥", "#1E88E5"),
@@ -886,6 +977,59 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
     }
 }
 
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        // ── Bundle: 3 tabel baru ──
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `menu_bundles` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `nama` TEXT NOT NULL DEFAULT '',
+                `deskripsi` TEXT NOT NULL DEFAULT '',
+                `hargaBundle` INTEGER NOT NULL DEFAULT 0,
+                `kategoriId` INTEGER NOT NULL DEFAULT 0,
+                `fotoUri` TEXT,
+                `tipe` TEXT NOT NULL DEFAULT 'FIXED',
+                `hargaAsli` INTEGER NOT NULL DEFAULT 0,
+                `tersedia` INTEGER NOT NULL DEFAULT 1,
+                `aktif` INTEGER NOT NULL DEFAULT 1,
+                `urutan` INTEGER NOT NULL DEFAULT 0,
+                `jamMulai` INTEGER NOT NULL DEFAULT 0,
+                `jamAkhir` INTEGER NOT NULL DEFAULT 0,
+                `createdAt` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `menu_bundle_groups` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `bundleId` INTEGER NOT NULL DEFAULT 0,
+                `nama` TEXT NOT NULL DEFAULT '',
+                `minPilih` INTEGER NOT NULL DEFAULT 0,
+                `maxPilih` INTEGER NOT NULL DEFAULT 1,
+                `urutan` INTEGER NOT NULL DEFAULT 0,
+                `wajib` INTEGER NOT NULL DEFAULT 1
+            )
+        """.trimIndent())
+
+        db.execSQL("""
+            CREATE TABLE IF NOT EXISTS `menu_bundle_items` (
+                `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                `groupId` INTEGER NOT NULL DEFAULT 0,
+                `menuId` INTEGER NOT NULL DEFAULT 0,
+                `qty` INTEGER NOT NULL DEFAULT 1,
+                `hargaExtra` INTEGER NOT NULL DEFAULT 0,
+                `isDefaultPick` INTEGER NOT NULL DEFAULT 0,
+                `urutan` INTEGER NOT NULL DEFAULT 0
+            )
+        """.trimIndent())
+
+        // ── OrderItem: field bundle ──
+        db.execSQL("ALTER TABLE order_items ADD COLUMN bundleId INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE order_items ADD COLUMN bundleNama TEXT NOT NULL DEFAULT ''")
+        db.execSQL("ALTER TABLE order_items ADD COLUMN pilihanJson TEXT NOT NULL DEFAULT ''")
+    }
+}
+
 // ═══════ DATABASE ═══════
 
 @Database(
@@ -894,9 +1038,10 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
         FeatureToggleEntity::class, Kategori::class, ExpenseCategory::class,
         Expense::class, MenuItem::class, StockMovement::class, Order::class,
         OrderItem::class, Shift::class, Member::class, Voucher::class,
-        MemberTransaction::class
+        MemberTransaction::class,
+        MenuBundle::class, MenuBundleGroup::class, MenuBundleItem::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -915,6 +1060,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun memberDao(): MemberDao
     abstract fun voucherDao(): VoucherDao
     abstract fun memberTxDao(): MemberTxDao
+    abstract fun menuBundleDao(): MenuBundleDao
 
     companion object {
         @Volatile private var INSTANCE: AppDatabase? = null
@@ -927,7 +1073,7 @@ abstract class AppDatabase : RoomDatabase() {
                 ).addMigrations(
                     MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5,
                     MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8,
-                    MIGRATION_8_9, MIGRATION_9_10
+                    MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11
                 ).build().also { INSTANCE = it }
             }
     }
@@ -997,7 +1143,6 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getThemeMode() = ThemeMode.fromId(get(KEY_TEMA_MODE, "system"))
     suspend fun setThemeMode(m: ThemeMode) = set(KEY_TEMA_MODE, m.id)
 
-    // ═══ APP THEME (warna brand) ═══
     suspend fun getAppTheme() = AppTheme.fromId(get(KEY_APP_THEME, "orange"))
     suspend fun setAppTheme(t: AppTheme) = set(KEY_APP_THEME, t.id)
 
@@ -1034,7 +1179,6 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getAntrianPrefix() = get(KEY_ANTRIAN_PREFIX, "")
     suspend fun setAntrianPrefix(v: String) = set(KEY_ANTRIAN_PREFIX, v)
 
-    // Template struk — toggle field
     suspend fun isStrukShowKasir() = get(KEY_STRUK_KASIR, "1") == "1"
     suspend fun setStrukShowKasir(v: Boolean) = set(KEY_STRUK_KASIR, if (v) "1" else "0")
     suspend fun isStrukShowMeja() = get(KEY_STRUK_MEJA, "1") == "1"
@@ -1052,9 +1196,18 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun isStrukShowTelepon() = get(KEY_STRUK_TELEPON, "1") == "1"
     suspend fun setStrukShowTelepon(v: Boolean) = set(KEY_STRUK_TELEPON, if (v) "1" else "0")
 
-    // Template struk — pilihan
     suspend fun getStrukTemplate() = get(KEY_STRUK_TEMPLATE, "STANDAR")
     suspend fun setStrukTemplate(v: String) = set(KEY_STRUK_TEMPLATE, v)
+
+    // ── Struk: Field Custom ──
+    suspend fun getStrukHeader1() = get(KEY_STRUK_HEADER1, "")
+    suspend fun setStrukHeader1(v: String) = set(KEY_STRUK_HEADER1, v)
+    suspend fun getStrukHeader2() = get(KEY_STRUK_HEADER2, "")
+    suspend fun setStrukHeader2(v: String) = set(KEY_STRUK_HEADER2, v)
+    suspend fun getStrukFooter1() = get(KEY_STRUK_FOOTER1, "")
+    suspend fun setStrukFooter1(v: String) = set(KEY_STRUK_FOOTER1, v)
+    suspend fun getStrukFooter2() = get(KEY_STRUK_FOOTER2, "")
+    suspend fun setStrukFooter2(v: String) = set(KEY_STRUK_FOOTER2, v)
 
     companion object {
         const val KEY_NAMA_TOKO = "toko_nama"
@@ -1086,6 +1239,10 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_STRUK_ALAMAT = "struk_show_alamat"
         const val KEY_STRUK_TELEPON = "struk_show_telepon"
         const val KEY_STRUK_TEMPLATE = "struk_template"
+        const val KEY_STRUK_HEADER1 = "struk_header_1"
+        const val KEY_STRUK_HEADER2 = "struk_header_2"
+        const val KEY_STRUK_FOOTER1 = "struk_footer_1"
+        const val KEY_STRUK_FOOTER2 = "struk_footer_2"
     }
 }
 
@@ -1460,3 +1617,53 @@ class CrmRepository(
         voucherDao.update(v.copy(terpakai = v.terpakai + 1))
     }
 }
+
+class MenuBundleRepository(private val dao: MenuBundleDao) {
+    val bundles: Flow<List<MenuBundle>> = dao.observeAll()
+
+    suspend fun getAll() = dao.getAll()
+    suspend fun getById(id: Long) = dao.getById(id)
+
+    suspend fun save(bundle: MenuBundle): Long {
+        val id = if (bundle.id == 0L) {
+            val next = dao.maxUrutan() + 1
+            dao.upsert(bundle.copy(urutan = next))
+        } else {
+            dao.upsert(bundle)
+        }
+        return id
+    }
+
+    suspend fun delete(bundle: MenuBundle) {
+        dao.deleteAllItemsOf(bundle.id)
+        dao.deleteGroups(bundle.id)
+        dao.delete(bundle)
+    }
+
+    suspend fun groupsOf(bundleId: Long) = dao.groupsOf(bundleId)
+    suspend fun saveGroup(g: MenuBundleGroup) = dao.upsertGroup(g)
+    suspend fun saveGroups(groups: List<MenuBundleGroup>) = dao.upsertGroups(groups)
+    suspend fun deleteGroups(bundleId: Long) = dao.deleteGroups(bundleId)
+
+    suspend fun itemsOf(groupId: Long) = dao.itemsOf(groupId)
+    suspend fun saveItem(item: MenuBundleItem) = dao.upsertItem(item)
+    suspend fun saveItems(items: List<MenuBundleItem>) = dao.upsertItems(items)
+    suspend fun deleteItemsOf(groupId: Long) = dao.deleteItemsOf(groupId)
+
+    suspend fun loadFull(bundleId: Long): Triple<
+        MenuBundle?,
+        List<MenuBundleGroup>,
+        Map<Long, List<MenuBundleItem>>
+    > {
+        val bundle = dao.getById(bundleId) ?: return Triple(null, emptyList(), emptyMap())
+        val groups = dao.groupsOf(bundleId)
+        val itemsMap = groups.associate { g -> g.id to dao.itemsOf(g.id) }
+        return Triple(bundle, groups, itemsMap)
+    }
+}
+
+
+
+
+
+
