@@ -300,6 +300,7 @@ class StrukBuilder(private val width: Int = 32) {
 
 // ═══════════════════════════════════════════════════════════
 // STRUK TEXT BUILDER — sudah baca toggle template struk
+// + grouping bundle
 // ═══════════════════════════════════════════════════════════
 suspend fun buildStrukText(
     settingRepo: SettingRepository,
@@ -356,11 +357,34 @@ suspend fun buildStrukText(
             sb.appendLine("Pelanggan: ${order.namaPelanggan}")
     }
     sb.appendLine("-".repeat(width))
-    items.forEach { it ->
-        sb.appendLine(it.namaMenu)
-        sb.appendLine(padLR("  ${it.qty} x ${rp(it.hargaSatuan)}", rp(it.subtotal)))
-        if (showCatatan && it.catatan.isNotBlank()) sb.appendLine("  * ${it.catatan}")
+
+    // ⬇️⬇️ PATCH: grouping bundle (text) ⬇️⬇️
+    val grouped = items.groupBy { it.bundleId }
+    grouped.forEach { (bundleId, groupItems) ->
+        if (bundleId == 0L) {
+            // Item biasa
+            groupItems.forEach { it ->
+                sb.appendLine(it.namaMenu)
+                sb.appendLine(padLR("  ${it.qty} x ${rp(it.hargaSatuan)}", rp(it.subtotal)))
+                if (showCatatan && it.catatan.isNotBlank())
+                    sb.appendLine("  * ${it.catatan}")
+            }
+        } else {
+            // Bundle
+            val mainItem = groupItems.firstOrNull { it.menuId == 0L }
+            val subs = groupItems.filter { it.menuId != 0L }
+            if (mainItem != null) {
+                sb.appendLine(mainItem.namaMenu)
+                sb.appendLine(padLR("  ${mainItem.qty} x ${rp(mainItem.hargaSatuan)}",
+                    rp(mainItem.subtotal)))
+                subs.forEach { sub ->
+                    sb.appendLine("  - ${sub.namaMenu.trimStart('•', ' ')} x${sub.qty}")
+                }
+            }
+        }
     }
+    // ⬆️⬆️ END PATCH ⬆️⬆️
+
     sb.appendLine("-".repeat(width))
     if (order.subtotal > 0) sb.appendLine(padLR("Subtotal", rp(order.subtotal)))
     if (order.diskonAmount > 0)
@@ -384,6 +408,7 @@ suspend fun buildStrukText(
 
 // ═══════════════════════════════════════════════════════════
 // CETAK STRUK — sudah baca toggle template struk
+// + grouping bundle
 // ═══════════════════════════════════════════════════════════
 suspend fun cetakStruk(
     settingRepo: SettingRepository,
@@ -433,11 +458,33 @@ suspend fun cetakStruk(
             b.line("Pelanggan: ${order.namaPelanggan}")
     }
     b.divider()
-    items.forEach { it ->
-        b.line(it.namaMenu)
-        b.lrLine("  ${it.qty} x ${rp(it.hargaSatuan)}", rp(it.subtotal))
-        if (showCatatan && it.catatan.isNotBlank()) b.line("  * ${it.catatan}")
+
+    // ⬇️⬇️ PATCH: grouping bundle (ESC/POS) ⬇️⬇️
+    val grouped = items.groupBy { it.bundleId }
+    grouped.forEach { (bundleId, groupItems) ->
+        if (bundleId == 0L) {
+            // Item biasa
+            groupItems.forEach { it ->
+                b.line(it.namaMenu)
+                b.lrLine("  ${it.qty} x ${rp(it.hargaSatuan)}", rp(it.subtotal))
+                if (showCatatan && it.catatan.isNotBlank()) b.line("  * ${it.catatan}")
+            }
+        } else {
+            // Bundle
+            val mainItem = groupItems.firstOrNull { it.menuId == 0L }
+            val subs = groupItems.filter { it.menuId != 0L }
+            if (mainItem != null) {
+                b.line(mainItem.namaMenu)
+                b.lrLine("  ${mainItem.qty} x ${rp(mainItem.hargaSatuan)}",
+                    rp(mainItem.subtotal))
+                subs.forEach { sub ->
+                    b.line("  - ${sub.namaMenu.trimStart('•', ' ')} x${sub.qty}")
+                }
+            }
+        }
     }
+    // ⬆️⬆️ END PATCH ⬆️⬆️
+
     b.divider()
     if (order.subtotal > 0) b.lrLine("Subtotal", rp(order.subtotal))
     if (order.diskonAmount > 0) b.lrLine("Diskon", "-" + rp(order.diskonAmount))
