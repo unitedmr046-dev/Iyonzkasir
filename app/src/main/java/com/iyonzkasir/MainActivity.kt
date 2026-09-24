@@ -47,6 +47,9 @@ class IyonzApp : Application() {
     val crmRepo: CrmRepository by lazy {
         CrmRepository(database.memberDao(), database.voucherDao(), database.memberTxDao())
     }
+    val bundleRepo: MenuBundleRepository by lazy {
+        MenuBundleRepository(database.menuBundleDao())
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -118,6 +121,10 @@ object Routes {
     const val PENGELUARAN = "pengeluaran"
     const val ANTRIAN = "antrian"
     const val TENTANG = "tentang"
+
+    // Bundle / Paket
+    const val BUNDLING = "bundling"
+    const val BUNDLING_EDIT = "bundling_edit"
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -222,6 +229,15 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.PENGELUARAN) { PengeluaranRoute(app, nav) }
         composable(Routes.ANTRIAN) { AntrianRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
+
+        // ── Bundle routes (dipakai setelah Bundling.kt dibuat) ──
+        composable(Routes.BUNDLING) { BundlingRoute(app, nav) }
+        composable("${Routes.BUNDLING_EDIT}/{id}") { entry ->
+            BundlingEditRoute(
+                app, nav,
+                entry.arguments?.getString("id")?.toLongOrNull()
+            )
+        }
     }
 }
 
