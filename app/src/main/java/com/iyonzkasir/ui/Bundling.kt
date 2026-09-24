@@ -1065,6 +1065,7 @@ private fun MenuItemConfigDialog(
     var isDefault by remember { mutableStateOf(false) }
 
     val qty = qtyText.toIntOrNull() ?: 1
+    val extra = extraText.toIntOrNull() ?: 0   // ⬅️ PATCH FIX 1
 
     AlertDialog(
         onDismissRequest = onDismiss,
