@@ -104,6 +104,19 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 onClick = { nav.navigate(Routes.KATEGORI) }
             ))
         }
+        // ⬇️⬇️ PATCH: menu Paket Bundling ⬇️⬇️
+        if (FeatureKey.BUNDLING in enabled &&
+            Session.can(PermissionKey.KELOLA_MENU)) {
+            toko.add(SettingItem(
+                key = "bundling",
+                title = "Paket Bundling",
+                subtitle = "Paket combo / bundling menu",
+                icon = Icons.Default.Inventory,
+                color = Color(0xFFFB8C00),
+                onClick = { nav.navigate(Routes.BUNDLING) }
+            ))
+        }
+        // ⬆️⬆️ END PATCH ⬆️⬆️
         if (Session.can(PermissionKey.KELOLA_USER)) {
             toko.add(SettingItem(
                 key = "user",
