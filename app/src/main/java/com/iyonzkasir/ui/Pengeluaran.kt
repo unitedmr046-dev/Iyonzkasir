@@ -195,16 +195,18 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
 
-            // Total card
+            // ═══ Total card (patched) ═══
             Card(
-                Modifier.fillMaxWidth().padding(12.dp),
+                Modifier.fillMaxWidth().padding(Sp.md),
+                shape = Rd.cardLg,
+                elevation = CardDefaults.cardElevation(defaultElevation = El.card),
                 colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)
             ) {
-                Column(Modifier.padding(16.dp)) {
+                Column(Modifier.padding(Sp.lg)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Payments, null, tint = BRAND,
                             modifier = Modifier.size(28.dp))
-                        Spacer(Modifier.width(12.dp))
+                        Spacer(Modifier.width(Sp.md))
                         Column(Modifier.weight(1f)) {
                             Text("Total Pengeluaran",
                                 style = MaterialTheme.typography.bodySmall)
@@ -221,8 +223,10 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
 
             // Periode chips
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                contentPadding = PaddingValues(
+                    horizontal = Sp.md, vertical = Sp.xs
+                ),
+                horizontalArrangement = Arrangement.spacedBy(Sp.xs)
             ) {
                 items(Periode.values().toList()) { p ->
                     FilterChip(
@@ -234,7 +238,7 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
                 }
             }
 
-            // Search
+            // Search (patched)
             OutlinedTextField(
                 value = vm.searchQuery,
                 onValueChange = { vm.searchQuery = it; vm.load() },
@@ -253,15 +257,17 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
                 textStyle = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
+                    .padding(horizontal = Sp.md, vertical = Sp.xs)
                     .height(52.dp)
             )
 
             // Kategori filter chips
             if (categories.isNotEmpty()) {
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    contentPadding = PaddingValues(
+                        horizontal = Sp.md, vertical = Sp.xs
+                    ),
+                    horizontalArrangement = Arrangement.spacedBy(Sp.xs)
                 ) {
                     item {
                         FilterChip(
@@ -275,7 +281,8 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
                         FilterChip(
                             selected = vm.filterKategoriId == c.id,
                             onClick = {
-                                vm.filterKategoriId = if (vm.filterKategoriId == c.id) null else c.id
+                                vm.filterKategoriId =
+                                    if (vm.filterKategoriId == c.id) null else c.id
                                 vm.load()
                             },
                             label = { Text("${c.iconName} ${c.nama}",
@@ -287,23 +294,25 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
 
             // List
             if (expenses.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Default.ReceiptLong, null, Modifier.size(56.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(8.dp))
-                        Text("Belum ada pengeluaran",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Tap tombol + untuk catat",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                // ═══ Empty state (patched) ═══
+                EmptyState(
+                    icon = Icons.Default.ReceiptLong,
+                    title = if (canEdit) "Belum ada pengeluaran"
+                            else "Belum ada catatan",
+                    subtitle = if (canEdit)
+                        "Tap tombol + untuk mencatat pengeluaran pertama"
+                    else "Belum ada pengeluaran yang dicatat",
+                    ctaLabel = if (canEdit) "Catat Pengeluaran" else null,
+                    onCta = if (canEdit) { { showForm = true } } else null
+                )
             } else {
                 LazyColumn(
                     Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(12.dp, 4.dp, 12.dp, 100.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                    contentPadding = PaddingValues(
+                        start = Sp.md, end = Sp.md,
+                        top = Sp.xs, bottom = 100.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(Sp.sm)
                 ) {
                     items(expenses, key = { it.id }) { e ->
                         ExpenseRow(e,
@@ -363,6 +372,7 @@ fun PengeluaranScreen(vm: PengeluaranViewModel, nav: NavHostController) {
     }
 }
 
+// ═══ ExpenseRow (patched) ═══
 @Composable
 private fun ExpenseRow(
     e: Expense,
@@ -370,8 +380,12 @@ private fun ExpenseRow(
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = Rd.card,
+        elevation = CardDefaults.cardElevation(defaultElevation = El.card)
+    ) {
+        Row(Modifier.padding(Sp.md), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(44.dp).clip(CircleShape)
                     .background(BRAND_LIGHT),
@@ -380,7 +394,7 @@ private fun ExpenseRow(
                 Text(e.kategoriNama.take(1).uppercase(),
                     fontWeight = FontWeight.Bold, color = BRAND)
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Sp.md))
             Column(Modifier.weight(1f)) {
                 Text(e.kategoriNama, fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.bodyMedium)
@@ -429,8 +443,12 @@ private fun ExpenseEditorDialog(
         if ((initial?.jumlah ?: 0) > 0) initial!!.jumlah.toString() else ""
     ) }
     var keterangan by remember { mutableStateOf(initial?.keterangan ?: "") }
-    var kategoriId by remember { mutableStateOf(initial?.kategoriId ?: (categories.firstOrNull()?.id ?: 0L)) }
-    var kategoriNama by remember { mutableStateOf(initial?.kategoriNama ?: (categories.firstOrNull()?.nama ?: "")) }
+    var kategoriId by remember {
+        mutableStateOf(initial?.kategoriId ?: (categories.firstOrNull()?.id ?: 0L))
+    }
+    var kategoriNama by remember {
+        mutableStateOf(initial?.kategoriNama ?: (categories.firstOrNull()?.nama ?: ""))
+    }
     var buktiFoto by remember { mutableStateOf(initial?.buktiFoto) }
     var showKategoriDropdown by remember { mutableStateOf(false) }
 
@@ -452,13 +470,14 @@ private fun ExpenseEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Catat Pengeluaran" else "Edit Pengeluaran") },
+        title = {
+            Text(if (initial == null) "Catat Pengeluaran" else "Edit Pengeluaran")
+        },
         text = {
             Column(
                 Modifier.heightIn(max = 550.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)
             ) {
-                // Kategori dropdown
                 Box {
                     OutlinedTextField(
                         value = kategoriNama.ifBlank { "Pilih kategori" },
@@ -490,18 +509,18 @@ private fun ExpenseEditorDialog(
                     }
                 }
 
-                // Jumlah
                 OutlinedTextField(
                     value = jumlahText,
-                    onValueChange = { jumlahText = it.filter { c -> c.isDigit() }.take(10) },
+                    onValueChange = {
+                        jumlahText = it.filter { c -> c.isDigit() }.take(10)
+                    },
                     label = { Text("Jumlah (Rp) *") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Quick amount
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(Sp.xs)) {
                     items(listOf(10000, 25000, 50000, 100000, 200000, 500000)) { v ->
                         AssistChip(
                             onClick = { jumlahText = v.toString() },
@@ -511,7 +530,6 @@ private fun ExpenseEditorDialog(
                     }
                 }
 
-                // Keterangan
                 OutlinedTextField(
                     value = keterangan,
                     onValueChange = { keterangan = it },
@@ -521,11 +539,10 @@ private fun ExpenseEditorDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                // Bukti foto (opsional)
                 buktiFoto?.let {
                     Box(
                         Modifier.fillMaxWidth().height(120.dp)
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(RoundedCornerShape(Rd.sm))
                     ) {
                         AsyncImage(
                             model = File(it),
@@ -548,11 +565,11 @@ private fun ExpenseEditorDialog(
                 if (!formValid) {
                     Surface(
                         color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(6.dp)
+                        shape = RoundedCornerShape(Rd.xs)
                     ) {
                         Text(
                             "Isi kategori & jumlah dulu ya",
-                            modifier = Modifier.padding(8.dp),
+                            modifier = Modifier.padding(Sp.sm),
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onErrorContainer
                         )
@@ -612,11 +629,11 @@ private fun KategoriPengeluaranDialog(
                     Spacer(Modifier.width(6.dp))
                     Text("Tambah Kategori")
                 }
-                Spacer(Modifier.height(8.dp))
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Spacer(Modifier.height(Sp.sm))
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(Sp.xs)) {
                     items(categories, key = { it.id }) { c ->
                         Card(Modifier.fillMaxWidth()) {
-                            Row(Modifier.padding(10.dp),
+                            Row(Modifier.padding(Sp.sm),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     Modifier.size(36.dp).clip(CircleShape)
@@ -626,7 +643,7 @@ private fun KategoriPengeluaranDialog(
                                     Text(c.iconName,
                                         style = MaterialTheme.typography.titleMedium)
                                 }
-                                Spacer(Modifier.width(10.dp))
+                                Spacer(Modifier.width(Sp.sm))
                                 Column(Modifier.weight(1f)) {
                                     Text(c.nama, fontWeight = FontWeight.SemiBold)
                                     if (c.isDefault) {
@@ -670,7 +687,9 @@ private fun KategoriPengeluaranDialog(
         AlertDialog(
             onDismissRequest = { confirmDelete = null },
             title = { Text("Hapus Kategori?") },
-            text = { Text("Hapus kategori '${c.nama}'? Pengeluaran lama tetap aman.") },
+            text = {
+                Text("Hapus kategori '${c.nama}'? Pengeluaran lama tetap aman.")
+            },
             confirmButton = {
                 TextButton(onClick = {
                     vm.deleteCategory(c)
@@ -703,11 +722,13 @@ private fun KategoriEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Kategori Baru" else "Edit Kategori") },
+        title = {
+            Text(if (initial == null) "Kategori Baru" else "Edit Kategori")
+        },
         text = {
             Column(
                 Modifier.heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)
             ) {
                 OutlinedTextField(
                     value = nama, onValueChange = { nama = it; err = null },
@@ -720,15 +741,15 @@ private fun KategoriEditorDialog(
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(6),
                     modifier = Modifier.height(140.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Sp.xs),
+                    verticalArrangement = Arrangement.spacedBy(Sp.xs)
                 ) {
                     items(iconPreset) { ic ->
                         val selected = iconName == ic
                         Box(
                             Modifier
                                 .size(44.dp)
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(RoundedCornerShape(Rd.sm))
                                 .background(if (selected) BRAND_LIGHT
                                 else MaterialTheme.colorScheme.surfaceVariant)
                                 .clickable { iconName = ic },
@@ -744,8 +765,8 @@ private fun KategoriEditorDialog(
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(6),
                     modifier = Modifier.height(90.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(Sp.xs),
+                    verticalArrangement = Arrangement.spacedBy(Sp.xs)
                 ) {
                     items(KATEGORI_WARNA_PRESET) { hex ->
                         val selected = warnaHex == hex
@@ -766,7 +787,8 @@ private fun KategoriEditorDialog(
                 }
 
                 err?.let {
-                    Text(it, color = DANGER, style = MaterialTheme.typography.bodySmall)
+                    Text(it, color = DANGER,
+                        style = MaterialTheme.typography.bodySmall)
                 }
             }
         },
@@ -806,8 +828,7 @@ private fun LaporanPengeluaranDialog(
         loading = true
         try {
             stats = vm.let {
-                val repo = it // gunakan repo via vm
-                // akses langsung — nanti di-inject
+                val repo = it
                 emptyList()
             }
         } catch (_: Exception) {}
@@ -819,13 +840,13 @@ private fun LaporanPengeluaranDialog(
         title = { Text("Laporan Pengeluaran") },
         text = {
             Column(Modifier.heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 Text("Periode: ${vm.periode.label}",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
 
                 Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Row(Modifier.padding(12.dp)) {
+                    Row(Modifier.padding(Sp.md)) {
                         Text("Total", Modifier.weight(1f),
                             fontWeight = FontWeight.Bold)
                         Text(vm.total.value.rupiah(),
@@ -845,9 +866,9 @@ private fun LaporanPengeluaranDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(Sp.xs)) {
                         items(grouped, key = { it.first }) { (nama, total) ->
-                            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            Row(Modifier.fillMaxWidth().padding(vertical = Sp.xs),
                                 verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
                                     Text(nama, fontWeight = FontWeight.Medium)
