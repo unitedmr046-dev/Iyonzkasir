@@ -70,21 +70,25 @@ class CrmViewModel(private val repo: CrmRepository) : ViewModel() {
     suspend fun statMember(id: Long) = repo.statMember(id)
     suspend fun ordersForMember(id: Long) = repo.ordersForMember(id)
     fun observeTx(memberId: Long) = repo.observeMemberTx(memberId)
-    fun bayarHutang(memberId: Long, jumlah: Int, ket: String = "") = viewModelScope.launch {
-        repo.bayarHutang(memberId, jumlah, ket)
-    }
-    fun redeemPoin(memberId: Long, poin: Int, onDone: (Int) -> Unit) = viewModelScope.launch {
-        val rupiah = repo.redeemPoin(memberId, poin)
-        onDone(rupiah)
-    }
-    fun adjust(memberId: Long, poinDelta: Int, hutangDelta: Int, ket: String) = viewModelScope.launch {
-        repo.adjust(memberId, poinDelta, hutangDelta, ket)
-    }
+    fun bayarHutang(memberId: Long, jumlah: Int, ket: String = "") =
+        viewModelScope.launch {
+            repo.bayarHutang(memberId, jumlah, ket)
+        }
+    fun redeemPoin(memberId: Long, poin: Int, onDone: (Int) -> Unit) =
+        viewModelScope.launch {
+            val rupiah = repo.redeemPoin(memberId, poin)
+            onDone(rupiah)
+        }
+    fun adjust(memberId: Long, poinDelta: Int, hutangDelta: Int, ket: String) =
+        viewModelScope.launch {
+            repo.adjust(memberId, poinDelta, hutangDelta, ket)
+        }
 }
 
 class CrmVMFactory(private val repo: CrmRepository) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
-    override fun <T : ViewModel> create(modelClass: Class<T>): T = CrmViewModel(repo) as T
+    override fun <T : ViewModel> create(modelClass: Class<T>): T =
+        CrmViewModel(repo) as T
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -139,8 +143,8 @@ fun CrmRoute(app: IyonzApp, nav: NavHostController) {
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            // Tab selector
-            TabRow(selectedTabIndex = tab, containerColor = MaterialTheme.colorScheme.surface) {
+            TabRow(selectedTabIndex = tab,
+                containerColor = MaterialTheme.colorScheme.surface) {
                 Tab(selected = tab == 0, onClick = { tab = 0 },
                     text = { Text("Member") },
                     icon = { Icon(Icons.Default.People, null, Modifier.size(20.dp)) })
@@ -228,26 +232,33 @@ private fun MemberList(
             textStyle = MaterialTheme.typography.bodyMedium,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp)
+                .padding(Sp.md)
                 .height(52.dp)
         )
 
         if (filtered.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(Icons.Default.PeopleOutline, null, Modifier.size(56.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    Text(if (vm.members.value.isEmpty()) "Belum ada member"
-                        else "Nggak ada yang cocok",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+            // ═══ Empty state (patched) ═══
+            EmptyState(
+                icon = Icons.Default.PeopleOutline,
+                title = if (vm.members.value.isEmpty()) "Belum ada member"
+                        else "Tidak ditemukan",
+                subtitle = if (vm.members.value.isEmpty())
+                    "Mulai bangun loyalty dengan mendaftarkan member"
+                else "Coba kata kunci lain",
+                ctaLabel = if (canEdit && vm.members.value.isEmpty()) "Daftar Member"
+                           else null,
+                onCta = if (canEdit && vm.members.value.isEmpty()) {
+                    { onEdit(Member()) }
+                } else null
+            )
         } else {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(12.dp, 0.dp, 12.dp, 100.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                contentPadding = PaddingValues(
+                    start = Sp.md, end = Sp.md,
+                    top = 0.dp, bottom = 100.dp
+                ),
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)
             ) {
                 items(filtered, key = { it.id }) { m ->
                     MemberCard(m, canEdit,
@@ -260,14 +271,18 @@ private fun MemberList(
     }
 }
 
+// ═══ MemberCard (patched) ═══
 @Composable
 private fun MemberCard(
     m: Member, canEdit: Boolean,
     onClick: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit
 ) {
-    Card(Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = RoundedCornerShape(10.dp)) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Card(
+        Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = Rd.card,
+        elevation = CardDefaults.cardElevation(defaultElevation = El.card)
+    ) {
+        Row(Modifier.padding(Sp.md), verticalAlignment = Alignment.CenterVertically) {
             Box(
                 Modifier.size(48.dp).clip(CircleShape).background(BRAND_LIGHT),
                 contentAlignment = Alignment.Center
@@ -276,7 +291,7 @@ private fun MemberCard(
                     color = BRAND, fontWeight = FontWeight.Bold,
                     style = MaterialTheme.typography.titleMedium)
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Sp.md))
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(m.nama, fontWeight = FontWeight.SemiBold)
@@ -292,7 +307,7 @@ private fun MemberCard(
                     Text("⭐ ${m.poin} poin",
                         style = MaterialTheme.typography.labelSmall)
                     if (m.hutang > 0) {
-                        Spacer(Modifier.width(8.dp))
+                        Spacer(Modifier.width(Sp.sm))
                         Text("💳 Hutang ${m.hutang.rupiah()}",
                             style = MaterialTheme.typography.labelSmall,
                             color = DANGER, fontWeight = FontWeight.SemiBold)
@@ -319,7 +334,7 @@ private fun TierBadge(tier: MemberTier) {
         MemberTier.GOLD -> Color(0xFFFFECB3) to Color(0xFFF57F17)
         MemberTier.PLATINUM -> Color(0xFFD1C4E9) to Color(0xFF4527A0)
     }
-    Surface(color = bg, shape = RoundedCornerShape(4.dp)) {
+    Surface(color = bg, shape = RoundedCornerShape(Rd.xs)) {
         Text(tier.label,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
             style = MaterialTheme.typography.labelSmall,
@@ -346,10 +361,13 @@ private fun MemberEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Member Baru" else "Edit Member") },
+        title = {
+            Text(if (initial == null || initial.id == 0L)
+                "Member Baru" else "Edit Member")
+        },
         text = {
             Column(Modifier.heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 OutlinedTextField(nama, { nama = it },
                     label = { Text("Nama *") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth())
@@ -420,7 +438,6 @@ private fun MemberDetailDialog(
         stat = vm.statMember(memberId)
     }
 
-    // Refresh member saat txList berubah
     LaunchedEffect(txList) {
         member = vm.getMember(memberId)
     }
@@ -433,7 +450,7 @@ private fun MemberDetailDialog(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(m.nama, fontWeight = FontWeight.Bold)
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(Sp.sm))
                     TierBadge(MemberTier.fromId(m.tier))
                 }
                 if (m.telepon.isNotBlank())
@@ -444,19 +461,20 @@ private fun MemberDetailDialog(
         },
         text = {
             Column(Modifier.heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
 
-                // Kartu poin & hutang
                 Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Row(Modifier.padding(12.dp)) {
+                    Row(Modifier.padding(Sp.md)) {
                         Column(Modifier.weight(1f)) {
-                            Text("Poin", style = MaterialTheme.typography.labelSmall,
+                            Text("Poin",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text("${m.poin}", fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleLarge, color = BRAND)
                         }
                         Column(Modifier.weight(1f)) {
-                            Text("Hutang", style = MaterialTheme.typography.labelSmall,
+                            Text("Hutang",
+                                style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(m.hutang.rupiah(), fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleLarge,
@@ -465,8 +483,7 @@ private fun MemberDetailDialog(
                     }
                 }
 
-                // Tombol aksi
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.sm)) {
                     OutlinedButton(
                         onClick = { showRedeem = true },
                         enabled = m.poin > 0,
@@ -490,7 +507,8 @@ private fun MemberDetailDialog(
                 OutlinedButton(
                     onClick = {
                         val telp = m.telepon.ifBlank { "" }
-                        if (telp.isNotBlank()) sendWa(ctx, telp, buatPesanWa(m, stat))
+                        if (telp.isNotBlank())
+                            sendWa(ctx, telp, buatPesanWa(m, stat))
                     },
                     enabled = m.telepon.isNotBlank(),
                     modifier = Modifier.fillMaxWidth()
@@ -500,29 +518,29 @@ private fun MemberDetailDialog(
                     Text("Kirim WhatsApp", style = MaterialTheme.typography.bodySmall)
                 }
 
-                // Statistik
                 stat?.let { s ->
                     Card {
-                        Column(Modifier.padding(12.dp)) {
+                        Column(Modifier.padding(Sp.md)) {
                             Text("Statistik", fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.bodyMedium)
                             Row {
                                 Text("Total order", Modifier.weight(1f),
                                     style = MaterialTheme.typography.bodySmall)
-                                Text("${s.totalOrder}x", fontWeight = FontWeight.SemiBold,
+                                Text("${s.totalOrder}x",
+                                    fontWeight = FontWeight.SemiBold,
                                     style = MaterialTheme.typography.bodySmall)
                             }
                             Row {
                                 Text("Total belanja", Modifier.weight(1f),
                                     style = MaterialTheme.typography.bodySmall)
-                                Text(s.totalOmzet.rupiah(), fontWeight = FontWeight.SemiBold,
+                                Text(s.totalOmzet.rupiah(),
+                                    fontWeight = FontWeight.SemiBold,
                                     style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
                 }
 
-                // Riwayat transaksi
                 Text("Riwayat", fontWeight = FontWeight.SemiBold,
                     style = MaterialTheme.typography.bodyMedium)
                 if (txList.isEmpty()) {
@@ -530,7 +548,7 @@ private fun MemberDetailDialog(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(Sp.xs)) {
                         items(txList.take(50), key = { it.id }) { tx ->
                             Row(verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.fillMaxWidth()) {
@@ -546,16 +564,19 @@ private fun MemberDetailDialog(
                                         style = MaterialTheme.typography.bodySmall)
                                     if (tx.poinDelta != 0) {
                                         Text(
-                                            (if (tx.poinDelta > 0) "+" else "") + "${tx.poinDelta} poin",
+                                            (if (tx.poinDelta > 0) "+" else "") +
+                                                "${tx.poinDelta} poin",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (tx.poinDelta > 0) SUCCESS else DANGER)
+                                            color = if (tx.poinDelta > 0) SUCCESS
+                                                    else DANGER)
                                     }
                                     if (tx.hutangDelta != 0) {
                                         Text(
                                             (if (tx.hutangDelta > 0) "+" else "") +
                                                 tx.hutangDelta.rupiah(),
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = if (tx.hutangDelta > 0) DANGER else SUCCESS)
+                                            color = if (tx.hutangDelta > 0) DANGER
+                                                    else SUCCESS)
                                     }
                                 }
                             }
@@ -581,9 +602,8 @@ private fun MemberDetailDialog(
             member = m,
             onDismiss = { showRedeem = false },
             onConfirm = { poin ->
-                vm.redeemPoin(m.id, poin) { rupiah ->
+                vm.redeemPoin(m.id, poin) { _ ->
                     showRedeem = false
-                    // toast via snackbar bisa ditambahin nanti
                 }
             }
         )
@@ -614,7 +634,7 @@ private fun RedeemPoinDialog(
         onDismissRequest = onDismiss,
         title = { Text("Tukar Poin") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 Text("Poin tersedia: ${member.poin}",
                     style = MaterialTheme.typography.bodySmall)
                 Text("1 poin = ${LoyaltyConfig.RUPIAH_PER_POIN.rupiah()}",
@@ -622,12 +642,14 @@ private fun RedeemPoinDialog(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = poinText,
-                    onValueChange = { poinText = it.filter { c -> c.isDigit() }.take(6) },
+                    onValueChange = {
+                        poinText = it.filter { c -> c.isDigit() }.take(6)
+                    },
                     label = { Text("Jumlah poin ditukar") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.xs)) {
                     listOf(10, 50, 100, member.poin).distinct()
                         .filter { it in 1..member.poin }.take(4).forEach { p ->
                         AssistChip(
@@ -639,7 +661,7 @@ private fun RedeemPoinDialog(
                 }
                 if (poin > 0) {
                     Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                        Column(Modifier.padding(10.dp)) {
+                        Column(Modifier.padding(Sp.sm)) {
                             Text("Dapat diskon: ${rupiah.rupiah()}",
                                 fontWeight = FontWeight.Bold, color = BRAND)
                             Text("Poin sisa: ${member.poin - poin}",
@@ -674,7 +696,7 @@ private fun BayarHutangDialog(
         onDismissRequest = onDismiss,
         title = { Text("Bayar Hutang") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 Text("Hutang: ${member.hutang.rupiah()}",
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold, color = DANGER)
@@ -685,7 +707,7 @@ private fun BayarHutangDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true, modifier = Modifier.fillMaxWidth()
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.xs)) {
                     AssistChip(onClick = { text = member.hutang.toString() },
                         label = { Text("Lunas semua",
                             style = MaterialTheme.typography.bodySmall) })
@@ -698,7 +720,8 @@ private fun BayarHutangDialog(
                     }
                 }
                 if (jumlah > 0) {
-                    Text("Sisa hutang: ${(member.hutang - jumlah).coerceAtLeast(0).rupiah()}",
+                    Text("Sisa hutang: " +
+                        (member.hutang - jumlah).coerceAtLeast(0).rupiah(),
                         style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -729,20 +752,22 @@ private fun VoucherList(
     val now = System.currentTimeMillis()
 
     if (vouchers.isEmpty()) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Icon(Icons.Default.LocalOffer, null, Modifier.size(56.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Spacer(Modifier.height(8.dp))
-                Text("Belum ada voucher",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
+        // ═══ Empty state (patched) ═══
+        EmptyState(
+            icon = Icons.Default.LocalOffer,
+            title = "Belum ada voucher",
+            subtitle = "Buat kode promo untuk tingkatkan penjualan",
+            ctaLabel = if (canEdit) "Buat Voucher" else null,
+            onCta = if (canEdit) { { onEdit(Voucher()) } } else null
+        )
     } else {
         LazyColumn(
             Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(12.dp, 12.dp, 12.dp, 100.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            contentPadding = PaddingValues(
+                start = Sp.md, end = Sp.md,
+                top = Sp.md, bottom = 100.dp
+            ),
+            verticalArrangement = Arrangement.spacedBy(Sp.sm)
         ) {
             items(vouchers, key = { it.kode }) { v ->
                 VoucherCard(v, now, canEdit,
@@ -753,6 +778,7 @@ private fun VoucherList(
     }
 }
 
+// ═══ VoucherCard (patched) ═══
 @Composable
 private fun VoucherCard(
     v: Voucher, now: Long, canEdit: Boolean,
@@ -762,10 +788,14 @@ private fun VoucherCard(
     val habis = v.kuota > 0 && v.terpakai >= v.kuota
     val invalid = expired || habis || !v.aktif
 
-    Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(10.dp)) {
-        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Card(
+        Modifier.fillMaxWidth(),
+        shape = Rd.card,
+        elevation = CardDefaults.cardElevation(defaultElevation = El.card)
+    ) {
+        Row(Modifier.padding(Sp.md), verticalAlignment = Alignment.CenterVertically) {
             Box(
-                Modifier.size(56.dp).clip(RoundedCornerShape(8.dp))
+                Modifier.size(56.dp).clip(RoundedCornerShape(Rd.sm))
                     .background(if (invalid) MaterialTheme.colorScheme.surfaceVariant
                     else BRAND_LIGHT),
                 contentAlignment = Alignment.Center
@@ -774,22 +804,25 @@ private fun VoucherCard(
                     if (it == "PERSEN") "${v.value}%" else "Rp"
                 }, fontWeight = FontWeight.Bold, color = BRAND)
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(Sp.md))
             Column(Modifier.weight(1f)) {
                 Text(v.kode, fontWeight = FontWeight.Bold)
                 Text(v.nama, style = MaterialTheme.typography.bodySmall)
                 Text(
                     buildString {
-                        if (v.minBelanja > 0) append("Min ${v.minBelanja.rupiah()} • ")
+                        if (v.minBelanja > 0)
+                            append("Min ${v.minBelanja.rupiah()} • ")
                         if (v.kuota > 0) append("${v.terpakai}/${v.kuota} • ")
-                        if (v.tglAkhir > 0) append("s/d " + v.tglAkhir.tanggalPendek())
+                        if (v.tglAkhir > 0)
+                            append("s/d " + v.tglAkhir.tanggalPendek())
                         else append("Tanpa batas")
                     },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (invalid) {
-                    Text(if (expired) "EXPIRED" else if (habis) "HABIS" else "NONAKTIF",
+                    Text(if (expired) "EXPIRED" else if (habis) "HABIS"
+                            else "NONAKTIF",
                         style = MaterialTheme.typography.labelSmall,
                         color = DANGER, fontWeight = FontWeight.Bold)
                 }
@@ -815,6 +848,7 @@ private fun VoucherEditorDialog(
     onDismiss: () -> Unit,
     onSave: (Voucher) -> Unit
 ) {
+    val isNew = initial == null || initial.kode.isBlank()
     var kode by remember { mutableStateOf(initial?.kode ?: "") }
     var nama by remember { mutableStateOf(initial?.nama ?: "") }
     var tipe by remember { mutableStateOf(initial?.tipe ?: "NOMINAL") }
@@ -822,10 +856,12 @@ private fun VoucherEditorDialog(
         mutableStateOf(if ((initial?.value ?: 0) > 0) initial!!.value.toString() else "")
     }
     var minText by remember {
-        mutableStateOf(if ((initial?.minBelanja ?: 0) > 0) initial!!.minBelanja.toString() else "")
+        mutableStateOf(if ((initial?.minBelanja ?: 0) > 0)
+            initial!!.minBelanja.toString() else "")
     }
     var maxText by remember {
-        mutableStateOf(if ((initial?.maxDiskon ?: 0) > 0) initial!!.maxDiskon.toString() else "")
+        mutableStateOf(if ((initial?.maxDiskon ?: 0) > 0)
+            initial!!.maxDiskon.toString() else "")
     }
     var kuotaText by remember {
         mutableStateOf(if ((initial?.kuota ?: 0) > 0) initial!!.kuota.toString() else "")
@@ -836,12 +872,13 @@ private fun VoucherEditorDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Voucher Baru" else "Edit Voucher") },
+        title = { Text(if (isNew) "Voucher Baru" else "Edit Voucher") },
         text = {
             Column(Modifier.heightIn(max = 500.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                verticalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 OutlinedTextField(kode,
-                    { kode = it.uppercase().filter { c -> c.isLetterOrDigit() }.take(20) },
+                    { kode = it.uppercase()
+                        .filter { c -> c.isLetterOrDigit() }.take(20) },
                     label = { Text("Kode *") },
                     placeholder = { Text("cth: HEMAT10") },
                     singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -851,10 +888,12 @@ private fun VoucherEditorDialog(
                     singleLine = true, modifier = Modifier.fillMaxWidth())
 
                 Text("Tipe diskon:", style = MaterialTheme.typography.bodySmall)
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    FilterChip(selected = tipe == "NOMINAL", onClick = { tipe = "NOMINAL" },
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.xs)) {
+                    FilterChip(selected = tipe == "NOMINAL",
+                        onClick = { tipe = "NOMINAL" },
                         label = { Text("Nominal (Rp)") })
-                    FilterChip(selected = tipe == "PERSEN", onClick = { tipe = "PERSEN" },
+                    FilterChip(selected = tipe == "PERSEN",
+                        onClick = { tipe = "PERSEN" },
                         label = { Text("Persen (%)") })
                 }
                 OutlinedTextField(valueText,
@@ -871,7 +910,8 @@ private fun VoucherEditorDialog(
                     OutlinedTextField(maxText,
                         { maxText = it.filter { c -> c.isDigit() }.take(9) },
                         label = { Text("Maks diskon (opsional)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number),
                         singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
                 OutlinedTextField(kuotaText,
@@ -879,11 +919,12 @@ private fun VoucherEditorDialog(
                     label = { Text("Kuota total (0 = unlimited)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true, modifier = Modifier.fillMaxWidth())
-                if (initial == null) {
+                if (isNew) {
                     OutlinedTextField(hariText,
                         { hariText = it.filter { c -> c.isDigit() }.take(3) },
                         label = { Text("Berlaku berapa hari? (0 = tanpa batas)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number),
                         singleLine = true, modifier = Modifier.fillMaxWidth())
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -905,9 +946,9 @@ private fun VoucherEditorDialog(
                     else -> {
                         val now = System.currentTimeMillis()
                         val days = hariText.toIntOrNull() ?: 0
-                        val tglAkhir = if (initial == null) {
+                        val tglAkhir = if (isNew) {
                             if (days > 0) now + days * 24L * 60 * 60 * 1000 else 0L
-                        } else initial.tglAkhir
+                        } else initial!!.tglAkhir
                         onSave((initial ?: Voucher()).copy(
                             kode = kode.trim(),
                             nama = nama.trim(),
