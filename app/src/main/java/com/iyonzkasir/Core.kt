@@ -147,6 +147,26 @@ enum class PaymentMethod(val id: String, val label: String) {
     }
 }
 
+// ═══════ BUNDLE / PAKET ═══════  ⬅️ PATCH 1A
+enum class BundleTipe(
+    val id: String,
+    val label: String,
+    val emoji: String,
+    val deskripsi: String
+) {
+    FIXED("FIXED", "Paket Tetap", "📦",
+        "Semua item wajib, harga fix"),
+    PILIHAN("PILIHAN", "Paket Pilihan", "🎁",
+        "Pilih dari beberapa grup"),
+    MIX("MIX", "Paket Mix", "🎨",
+        "Pilih X dari kategori");
+
+    companion object {
+        fun fromId(id: String) = values().firstOrNull { it.id == id } ?: FIXED
+    }
+}
+// ⬆️ END PATCH 1A
+
 enum class MemberTier(val id: String, val label: String, val minBelanja: Int) {
     BASIC("BASIC", "Basic", 0),
     SILVER("SILVER", "Silver", 500_000),
@@ -189,6 +209,7 @@ enum class FeatureKey(
     PAJAK("pos_pajak", "Pajak / PPN", "POS", "Hitung pajak otomatis"),
     VOID_REFUND("pos_void_refund", "Void / Refund", "POS", "Batalkan transaksi"),
     HOLD_ORDER("pos_hold_order", "Hold Order", "POS", "Tahan pesanan sementara"),
+    BUNDLING("pos_bundling", "Paket & Bundling", "POS", "Paket combo / bundling menu"),  // ⬅️ PATCH 1B
 
     POTONG_STOK("inv_potong_stok", "Potong Stok Otomatis", "Inventaris", "Kurangi stok saat jual"),
     LOW_STOCK_ALERT("inv_low_stock", "Alert Stok Menipis", "Inventaris", "Notifikasi stok minim"),
