@@ -10,6 +10,8 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -175,6 +177,10 @@ class KasirViewModel(
     }
 
     fun poinKeRupiah(poin: Int) = LoyaltyConfig.poinKeRupiah(poin)
+
+    // ⬇️ PATCH 3A: tambah method loadBundleFull
+    suspend fun loadBundleFull(id: Long) = bundleRepo.loadFull(id)
+    // ⬆️ END PATCH 3A
 
     // ── Add menu biasa ──
     fun add(menu: MenuItem, catatan: String = "") {
@@ -1475,7 +1481,9 @@ private fun BundlePickerDialog(
 
     LaunchedEffect(bundle.id) {
         loading = true
-        val (_, gs, im) = vm.bundleRepoLocal.loadFull(bundle.id)
+        // ⬇️ PATCH 3B: pakai vm.loadBundleFull() bukan vm.bundleRepoLocal
+        val (_, gs, im) = vm.loadBundleFull(bundle.id)
+        // ⬆️ END PATCH 3B
         groups = gs
         itemsMap = im
 
@@ -2014,7 +2022,6 @@ private fun CartLineItem(
         }
     }
 }
-
 
 // ═══════════════════════════════════════════════════════════
 // DISKON DIALOG
@@ -3110,7 +3117,6 @@ fun EditMenuScreen(vm: MenuViewModel, menuId: Long?, onBack: () -> Unit) {
             onDismiss = { showBarcodeScan = false })
     }
 }
-
 
 // ═══════════════════════════════════════════════════════════
 // RIWAYAT
