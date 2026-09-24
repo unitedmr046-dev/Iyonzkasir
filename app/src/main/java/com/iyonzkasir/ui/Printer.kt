@@ -131,24 +131,20 @@ object PrinterService {
             try { adapter.cancelDiscovery() } catch (_: Exception) {}
             delay(500)
 
-            // #1 Secure
             lastStep = "Connect #1 (secure)"
             var s = trySecure(device, STANDARD_UUID)
             if (s != null) return@withContext finalize(s, mac)
 
             delay(700)
-            // #2 Secure retry
             lastStep = "Connect #2 (secure retry)"
             s = trySecure(device, STANDARD_UUID)
             if (s != null) return@withContext finalize(s, mac)
 
             delay(700)
-            // #3 Insecure
             lastStep = "Connect #3 (insecure)"
             s = tryInsecure(device, STANDARD_UUID)
             if (s != null) return@withContext finalize(s, mac)
 
-            // #4 Alternative UUIDs
             for ((i, u) in ALT_UUIDS.withIndex()) {
                 delay(500)
                 lastStep = "UUID alt #${i + 1}"
@@ -159,7 +155,6 @@ object PrinterService {
             }
 
             delay(500)
-            // #5 Reflection channel 1
             lastStep = "Reflection channel 1"
             s = tryReflection(device, 1)
             if (s != null) return@withContext finalize(s, mac)
@@ -191,9 +186,7 @@ object PrinterService {
                 try { s.close() } catch (_: Exception) {}
                 null
             }
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     private fun tryInsecure(device: BluetoothDevice, uuid: UUID): BluetoothSocket? {
@@ -207,9 +200,7 @@ object PrinterService {
                 try { s.close() } catch (_: Exception) {}
                 null
             }
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     private fun tryReflection(device: BluetoothDevice, channel: Int): BluetoothSocket? {
@@ -223,9 +214,7 @@ object PrinterService {
                 try { s.close() } catch (_: Exception) {}
                 null
             }
-        } catch (_: Exception) {
-            null
-        }
+        } catch (_: Exception) { null }
     }
 
     fun disconnect() {
@@ -310,7 +299,7 @@ class StrukBuilder(private val width: Int = 32) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// STRUK TEXT BUILDER — SUSPEND (baca settings via repo)
+// STRUK TEXT BUILDER — sudah baca toggle template struk
 // ═══════════════════════════════════════════════════════════
 suspend fun buildStrukText(
     settingRepo: SettingRepository,
@@ -322,6 +311,16 @@ suspend fun buildStrukText(
     val alamat = settingRepo.getAlamatToko()
     val telepon = settingRepo.getTeleponToko()
     val footer = settingRepo.getFooterStruk()
+
+    val showAlamat = settingRepo.isStrukShowAlamat()
+    val showTelepon = settingRepo.isStrukShowTelepon()
+    val showKasir = settingRepo.isStrukShowKasir()
+    val showMeja = settingRepo.isStrukShowMeja()
+    val showPelanggan = settingRepo.isStrukShowPelanggan()
+    val showAntrian = settingRepo.isStrukShowAntrian()
+    val showCatatan = settingRepo.isStrukShowCatatan()
+    val showPoin = settingRepo.isStrukShowPoin()
+
     val fmt = NumberFormat.getNumberInstance(Locale("in", "ID"))
     fun rp(v: Int) = "Rp " + fmt.format(v)
     fun padCenter(s: String): String {
@@ -336,30 +335,44 @@ suspend fun buildStrukText(
 
     val sb = StringBuilder()
     sb.appendLine(padCenter(namaToko.uppercase()))
-    if (alamat.isNotBlank()) sb.appendLine(padCenter(alamat))
-    if (telepon.isNotBlank()) sb.appendLine(padCenter("Telp: $telepon"))
+    if (showAlamat && alamat.isNotBlank()) sb.appendLine(padCenter(alamat))
+    if (showTelepon && telepon.isNotBlank()) sb.appendLine(padCenter("Telp: $telepon"))
     sb.appendLine("-".repeat(width))
-    sb.appendLine(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("id")).format(Date(order.timestamp)))
-    sb.appendLine(padLR("No: #${order.id}", "Kasir: ${order.kasirNama.take(12)}"))
-    if (order.nomorMeja.isNotBlank()) sb.appendLine("Meja: ${order.nomorMeja}")
+    sb.appendLine(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("id"))
+        .format(Date(order.timestamp)))
+    if (showKasir) {
+        sb.appendLine(padLR("No: #${order.id}", "Kasir: ${order.kasirNama.take(12)}"))
+    } else {
+        sb.appendLine("No: #${order.id}")
+    }
+    if (showAntrian && order.nomorAntrian > 0)
+        sb.appendLine("Antrian: #${order.nomorAntrian}")
+    if (showMeja && order.nomorMeja.isNotBlank())
+        sb.appendLine("Meja: ${order.nomorMeja}")
     sb.appendLine("Tipe: ${TipeOrder.fromId(order.tipeOrder).label}")
-    if (order.memberNama.isNotBlank()) sb.appendLine("Member: ${order.memberNama}")
-    else if (order.namaPelanggan.isNotBlank()) sb.appendLine("Pelanggan: ${order.namaPelanggan}")
+    if (showPelanggan) {
+        if (order.memberNama.isNotBlank()) sb.appendLine("Member: ${order.memberNama}")
+        else if (order.namaPelanggan.isNotBlank())
+            sb.appendLine("Pelanggan: ${order.namaPelanggan}")
+    }
     sb.appendLine("-".repeat(width))
     items.forEach { it ->
         sb.appendLine(it.namaMenu)
         sb.appendLine(padLR("  ${it.qty} x ${rp(it.hargaSatuan)}", rp(it.subtotal)))
-        if (it.catatan.isNotBlank()) sb.appendLine("  * ${it.catatan}")
+        if (showCatatan && it.catatan.isNotBlank()) sb.appendLine("  * ${it.catatan}")
     }
     sb.appendLine("-".repeat(width))
     if (order.subtotal > 0) sb.appendLine(padLR("Subtotal", rp(order.subtotal)))
-    if (order.diskonAmount > 0) sb.appendLine(padLR("Diskon", "-" + rp(order.diskonAmount)))
-    if (order.voucherAmount > 0) sb.appendLine(padLR("Voucher", "-" + rp(order.voucherAmount)))
-    if (order.pajakAmount > 0) sb.appendLine(padLR("PPN ${order.pajakPersen}%", rp(order.pajakAmount)))
+    if (order.diskonAmount > 0)
+        sb.appendLine(padLR("Diskon", "-" + rp(order.diskonAmount)))
+    if (order.voucherAmount > 0)
+        sb.appendLine(padLR("Voucher", "-" + rp(order.voucherAmount)))
+    if (order.pajakAmount > 0)
+        sb.appendLine(padLR("PPN ${order.pajakPersen}%", rp(order.pajakAmount)))
     sb.appendLine(padLR("TOTAL", rp(order.total)))
     sb.appendLine(padLR(PaymentMethod.fromId(order.metodeBayar).label, rp(order.dibayar)))
     if (order.kembalian > 0) sb.appendLine(padLR("Kembali", rp(order.kembalian)))
-    if (order.poinDidapat > 0) {
+    if (showPoin && order.poinDidapat > 0) {
         sb.appendLine("-".repeat(width))
         sb.appendLine(padCenter("Poin didapat: +${order.poinDidapat}"))
     }
@@ -370,7 +383,7 @@ suspend fun buildStrukText(
 }
 
 // ═══════════════════════════════════════════════════════════
-// CETAK STRUK
+// CETAK STRUK — sudah baca toggle template struk
 // ═══════════════════════════════════════════════════════════
 suspend fun cetakStruk(
     settingRepo: SettingRepository,
@@ -382,6 +395,16 @@ suspend fun cetakStruk(
     val alamat = settingRepo.getAlamatToko()
     val telepon = settingRepo.getTeleponToko()
     val footer = settingRepo.getFooterStruk()
+
+    val showAlamat = settingRepo.isStrukShowAlamat()
+    val showTelepon = settingRepo.isStrukShowTelepon()
+    val showKasir = settingRepo.isStrukShowKasir()
+    val showMeja = settingRepo.isStrukShowMeja()
+    val showPelanggan = settingRepo.isStrukShowPelanggan()
+    val showAntrian = settingRepo.isStrukShowAntrian()
+    val showCatatan = settingRepo.isStrukShowCatatan()
+    val showPoin = settingRepo.isStrukShowPoin()
+
     val fmt = NumberFormat.getNumberInstance(Locale("in", "ID"))
     fun rp(v: Int) = "Rp " + fmt.format(v)
 
@@ -389,32 +412,42 @@ suspend fun cetakStruk(
     b.center().boldOn().bigText()
         .centerLine(namaToko.uppercase())
         .normalText().boldOff()
-    if (alamat.isNotBlank()) b.centerLine(alamat)
-    if (telepon.isNotBlank()) b.centerLine("Telp: $telepon")
+    if (showAlamat && alamat.isNotBlank()) b.centerLine(alamat)
+    if (showTelepon && telepon.isNotBlank()) b.centerLine("Telp: $telepon")
     b.feed(1).divider().left()
-    b.line(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("id")).format(Date(order.timestamp)))
-    b.lrLine("No: #${order.id}", "Kasir: ${order.kasirNama.take(12)}")
-    if (order.nomorMeja.isNotBlank()) b.line("Meja: ${order.nomorMeja}")
+    b.line(SimpleDateFormat("dd/MM/yyyy HH:mm", Locale("id"))
+        .format(Date(order.timestamp)))
+    if (showKasir) {
+        b.lrLine("No: #${order.id}", "Kasir: ${order.kasirNama.take(12)}")
+    } else {
+        b.line("No: #${order.id}")
+    }
+    if (showAntrian && order.nomorAntrian > 0)
+        b.line("Antrian: #${order.nomorAntrian}")
+    if (showMeja && order.nomorMeja.isNotBlank())
+        b.line("Meja: ${order.nomorMeja}")
     b.line("Tipe: ${TipeOrder.fromId(order.tipeOrder).label}")
-    if (order.memberNama.isNotBlank()) b.line("Member: ${order.memberNama}")
-    else if (order.namaPelanggan.isNotBlank()) b.line("Pelanggan: ${order.namaPelanggan}")
+    if (showPelanggan) {
+        if (order.memberNama.isNotBlank()) b.line("Member: ${order.memberNama}")
+        else if (order.namaPelanggan.isNotBlank())
+            b.line("Pelanggan: ${order.namaPelanggan}")
+    }
     b.divider()
     items.forEach { it ->
         b.line(it.namaMenu)
         b.lrLine("  ${it.qty} x ${rp(it.hargaSatuan)}", rp(it.subtotal))
-        if (it.catatan.isNotBlank()) b.line("  * ${it.catatan}")
+        if (showCatatan && it.catatan.isNotBlank()) b.line("  * ${it.catatan}")
     }
     b.divider()
     if (order.subtotal > 0) b.lrLine("Subtotal", rp(order.subtotal))
     if (order.diskonAmount > 0) b.lrLine("Diskon", "-" + rp(order.diskonAmount))
     if (order.voucherAmount > 0) b.lrLine("Voucher", "-" + rp(order.voucherAmount))
-    if (order.pajakAmount > 0) b.lrLine("PPN ${order.pajakPersen}%", rp(order.pajakAmount))
-    b.boldOn().bigText()
-        .lrLine("TOTAL", rp(order.total))
-        .normalText().boldOff()
+    if (order.pajakAmount > 0)
+        b.lrLine("PPN ${order.pajakPersen}%", rp(order.pajakAmount))
+    b.boldOn().bigText().lrLine("TOTAL", rp(order.total)).normalText().boldOff()
     b.lrLine(PaymentMethod.fromId(order.metodeBayar).label, rp(order.dibayar))
     if (order.kembalian > 0) b.lrLine("Kembali", rp(order.kembalian))
-    if (order.poinDidapat > 0) {
+    if (showPoin && order.poinDidapat > 0) {
         b.divider()
         b.centerLine("Poin didapat: +${order.poinDidapat}")
     }
@@ -629,9 +662,9 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
             )
         }
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp)
+        Column(Modifier.padding(pad).fillMaxSize().padding(Sp.lg)
             .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            verticalArrangement = Arrangement.spacedBy(Sp.md)) {
 
             Card(
                 colors = CardDefaults.cardColors(
@@ -639,7 +672,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                     else MaterialTheme.colorScheme.surfaceVariant
                 )
             ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(Sp.lg), verticalAlignment = Alignment.CenterVertically) {
                     Icon(
                         if (connected) Icons.Default.BluetoothConnected
                         else Icons.Default.BluetoothDisabled,
@@ -647,7 +680,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                         else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(32.dp)
                     )
-                    Spacer(Modifier.width(12.dp))
+                    Spacer(Modifier.width(Sp.md))
                     Column(Modifier.weight(1f)) {
                         Text(
                             if (connecting) "Menghubungkan..."
@@ -665,7 +698,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 Button(
                     onClick = {
                         val needPerms = mutableListOf<String>()
@@ -749,8 +782,8 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
 
             Card(colors = CardDefaults.cardColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                Column(Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.padding(Sp.md),
+                    verticalArrangement = Arrangement.spacedBy(Sp.xs)) {
                     Text("💡 Tips Connect Printer",
                         fontWeight = FontWeight.Bold,
                         style = MaterialTheme.typography.bodySmall)
@@ -768,7 +801,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
             }
 
             Text("Ukuran Kertas", fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(Sp.sm)) {
                 listOf(58, 80).forEach { w ->
                     FilterChip(
                         selected = paperWidth == w,
@@ -782,7 +815,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
             }
 
             Card {
-                Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.padding(Sp.md), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Auto Print Struk", fontWeight = FontWeight.SemiBold)
                         Text("Cetak otomatis setelah bayar",
@@ -848,7 +881,7 @@ fun PrinterRoute(app: IyonzApp, nav: NavHostController) {
                         }
                     )
                 ) {
-                    Text(it, modifier = Modifier.padding(12.dp),
+                    Text(it, modifier = Modifier.padding(Sp.md),
                         style = MaterialTheme.typography.bodySmall,
                         color = if (it.startsWith("❌") || it.contains("Gagal") || it.contains("Timeout"))
                             MaterialTheme.colorScheme.onErrorContainer
@@ -932,7 +965,7 @@ private fun PairPickerDialog(
                     Text(error!!, color = DANGER,
                         style = MaterialTheme.typography.bodySmall)
                 } else if (devices.isEmpty()) {
-                    Box(Modifier.fillMaxWidth().padding(24.dp),
+                    Box(Modifier.fillMaxWidth().padding(Sp.xxl),
                         contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
@@ -940,14 +973,14 @@ private fun PairPickerDialog(
                     Text("Pilih dari perangkat yang sudah di-pair:",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(8.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Spacer(Modifier.height(Sp.sm))
+                    LazyColumn(verticalArrangement = Arrangement.spacedBy(Sp.xs)) {
                         items(devices, key = { it.address }) { d ->
                             Card(Modifier.fillMaxWidth().clickable { onPicked(d) }) {
-                                Row(Modifier.padding(12.dp),
+                                Row(Modifier.padding(Sp.md),
                                     verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.Print, null, tint = BRAND)
-                                    Spacer(Modifier.width(12.dp))
+                                    Spacer(Modifier.width(Sp.md))
                                     Column(Modifier.weight(1f)) {
                                         Text(d.name ?: "Unknown",
                                             fontWeight = FontWeight.SemiBold)
