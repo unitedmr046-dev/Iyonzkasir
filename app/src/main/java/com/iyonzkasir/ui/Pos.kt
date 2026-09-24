@@ -1494,10 +1494,10 @@ private fun BundlePickerDialog(
             val defaults = items.filter { it.isDefaultPick }.map { it.id }.toSet()
             if (defaults.isNotEmpty()) {
                 initial[g.id] = defaults
-            } else if (g.tipe?.let { true } != false && g.minPilih > 0) {
-                // Auto-pick first minPilih items kalau nggak ada default
-                initial[g.id] = items.take(g.minPilih).map { it.id }.toSet()
-            }
+            } else if (g.minPilih > 0) {
+    // Auto-pick first minPilih items kalau nggak ada default
+    initial[g.id] = items.take(g.minPilih).map { it.id }.toSet()
+}
         }
         picks = initial
         loading = false
