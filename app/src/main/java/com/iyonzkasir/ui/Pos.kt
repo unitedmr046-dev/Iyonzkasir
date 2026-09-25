@@ -6,15 +6,18 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -25,6 +28,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -35,14 +39,23 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -178,7 +191,7 @@ class KasirViewModel(
 
     fun poinKeRupiah(poin: Int) = LoyaltyConfig.poinKeRupiah(poin)
 
-    // ⬇️ PATCH 3A: tambah method loadBundleFull
+    // ⬇️ PATCH 3A: method loadBundleFull
     suspend fun loadBundleFull(id: Long) = bundleRepo.loadFull(id)
     // ⬆️ END PATCH 3A
 
@@ -766,7 +779,6 @@ class PosVMFactory(
     }
 }
 
-
 // ═══════════════════════════════════════════════════════════
 // ROUTES
 // ═══════════════════════════════════════════════════════════
@@ -946,7 +958,7 @@ fun DashboardRoute(app: IyonzApp) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// POS SCREEN
+// POS SCREEN — dengan floating cart bar Phase 2
 // ═══════════════════════════════════════════════════════════
 @Composable
 fun PosScreen(
@@ -972,24 +984,50 @@ fun PosScreen(
                 val subtotal by vm.subtotal.collectAsState()
                 val total = vm.hitungTotal(subtotal)
                 if (cart.isNotEmpty()) {
-                    Surface(
-                        modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                        shadowElevation = 8.dp
+                    val itemCount = cart.sumOf { it.qty }
+                    Row(
+                        Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = Sp.lg, vertical = Sp.md)
+                            .shadow(8.dp, RoundedCornerShape(28.dp))
+                            .clip(RoundedCornerShape(28.dp))
+                            .background(
+                                Brush.horizontalGradient(
+                                    colors = listOf(BRAND, BRAND_DARK)
+                                )
+                            )
+                            .clickable(onClick = onOpenKeranjang)
+                            .padding(horizontal = Sp.md, vertical = Sp.md),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(Modifier.fillMaxWidth().padding(Sp.md),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text("${cart.sumOf { it.qty }} item",
-                                    style = MaterialTheme.typography.bodySmall)
-                                Text(total.rupiah(), fontWeight = FontWeight.Bold,
-                                    style = MaterialTheme.typography.titleLarge, color = BRAND)
-                            }
-                            Button(onClick = onOpenKeranjang,
-                                colors = ButtonDefaults.buttonColors(containerColor = BRAND)) {
-                                Icon(Icons.Default.ShoppingCart, null)
-                                Spacer(Modifier.width(6.dp))
-                                Text("Keranjang")
-                            }
+                        Box(
+                            Modifier.size(40.dp).clip(CircleShape)
+                                .background(Color.Black.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.ShoppingCart, null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp))
+                        }
+                        Spacer(Modifier.width(Sp.md))
+                        Column(Modifier.weight(1f)) {
+                            Text("$itemCount Item · Total",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White.copy(alpha = 0.85f))
+                            Text(total.rupiah(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text("Lihat Keranjang",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White)
+                            Icon(Icons.Default.ChevronRight, null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp))
                         }
                     }
                 }
@@ -999,9 +1037,9 @@ fun PosScreen(
 }
 
 // ═══════════════════════════════════════════════════════════
-// MENU PANE — grid menu + bundle
+// MENU PANE — Phase 2 Redesign
 // ═══════════════════════════════════════════════════════════
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MenuPane(
     vm: KasirViewModel,
@@ -1010,7 +1048,7 @@ fun MenuPane(
     onBundleEdit: (Long) -> Unit = {}
 ) {
     var showBarcode by remember { mutableStateOf(false) }
-    var tabIndex by remember { mutableIntStateOf(0) } // 0=Menu, 1=Paket
+    var tabIndex by remember { mutableIntStateOf(0) }
     var pickerBundle by remember { mutableStateOf<MenuBundle?>(null) }
 
     val barcodeEnabled = FeatureManager.isEnabled(FeatureKey.BARCODE)
@@ -1037,173 +1075,189 @@ fun MenuPane(
 
     Scaffold(
         modifier = modifier,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("iyonzkasir",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold, color = BRAND)
-                        Text(
-                            if (vm.nomorMeja.isBlank()) "Belum pilih meja"
-                            else "Meja " + vm.nomorMeja,
-                            style = MaterialTheme.typography.bodySmall)
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(horizontal = Sp.lg, vertical = Sp.md),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Kasir / POS",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f))
+                if (barcodeEnabled) {
+                    IconButton(onClick = { showBarcode = true }) {
+                        Icon(Icons.Default.QrCodeScanner, null,
+                            tint = MaterialTheme.colorScheme.onSurface)
                     }
-                },
-                actions = {
-                    if (barcodeEnabled) {
-                        IconButton(onClick = { showBarcode = true }) {
-                            Icon(Icons.Default.QrCodeScanner, null, tint = BRAND)
-                        }
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface)
-            )
+                }
+                IconButton(onClick = { /* TODO: notif */ }) {
+                    Icon(Icons.Default.Notifications, null,
+                        tint = MaterialTheme.colorScheme.onSurface)
+                }
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(BRAND),
+                    contentAlignment = Alignment.Center
+                ) {
+                    val u = Session.current
+                    Text(
+                        u?.nama?.take(1)?.uppercase() ?: "A",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
-            if (FeatureManager.isEnabled(FeatureKey.NOMOR_MEJA)) {
-                OrderMetaBar(vm)
-            }
 
-            // ── Tab Menu / Paket ──
-            if (bundlingEnabled && bundles.isNotEmpty()) {
-                TabRow(
-                    selectedTabIndex = tabIndex,
-                    containerColor = MaterialTheme.colorScheme.surface
-                ) {
-                    Tab(
-                        selected = tabIndex == 0,
-                        onClick = { tabIndex = 0 },
-                        text = { Text("Menu") },
-                        icon = { Icon(Icons.Default.RestaurantMenu, null,
-                            Modifier.size(20.dp)) }
-                    )
-                    Tab(
-                        selected = tabIndex == 1,
-                        onClick = { tabIndex = 1 },
-                        text = { Text("Paket (${bundles.size})") },
-                        icon = { Icon(Icons.Default.LocalOffer, null,
-                            Modifier.size(20.dp)) }
-                    )
-                }
-            }
-
-            OutlinedTextField(
-                value = vm.searchQuery, onValueChange = { vm.searchQuery = it },
-                placeholder = { Text("Cari menu", style = MaterialTheme.typography.bodySmall) },
-                leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
-                trailingIcon = {
-                    if (vm.searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { vm.searchQuery = "" },
-                            modifier = Modifier.size(28.dp)) {
-                            Icon(Icons.Default.Close, null, Modifier.size(16.dp))
-                        }
-                    }
-                },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth()
-                    .padding(horizontal = Sp.md, vertical = Sp.xs)
+            // ═══ SEARCH BAR pill ═══
+            Box(
+                Modifier.fillMaxWidth()
+                    .padding(horizontal = Sp.lg)
                     .height(52.dp)
-            )
-
-            vm.barcodeMessage?.let { msg ->
-                Surface(
-                    color = if (msg.startsWith("✓")) BRAND_LIGHT
-                    else MaterialTheme.colorScheme.errorContainer,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = Sp.md)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Row(
+                    Modifier.fillMaxSize().padding(horizontal = Sp.lg),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(Modifier.padding(Sp.sm),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            if (msg.startsWith("✓")) Icons.Default.CheckCircle
-                            else Icons.Default.Error,
-                            null,
-                            tint = if (msg.startsWith("✓")) SUCCESS else DANGER,
-                            modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text(msg, style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f))
-                        IconButton(onClick = { vm.barcodeMessage = null },
-                            modifier = Modifier.size(24.dp)) {
-                            Icon(Icons.Default.Close, null, Modifier.size(14.dp))
+                    Icon(Icons.Default.Search, null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp))
+                    Spacer(Modifier.width(Sp.sm))
+                    BasicTextField(
+                        value = vm.searchQuery,
+                        onValueChange = { vm.searchQuery = it },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodyLarge.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        ),
+                        cursorBrush = SolidColor(BRAND),
+                        modifier = Modifier.weight(1f),
+                        decorationBox = { inner ->
+                            if (vm.searchQuery.isBlank()) {
+                                Text("Cari burger, pizza...",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            inner()
+                        }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(Sp.md))
+
+            // ═══ FILTER CHIPS ═══
+            if (kategoriList.size > 1) {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = Sp.lg),
+                    horizontalArrangement = Arrangement.spacedBy(Sp.sm)
+                ) {
+                    items(kategoriList.size) { i ->
+                        val k = kategoriList[i]
+                        val selected = k == vm.kategoriFilter
+                        Surface(
+                            onClick = { vm.kategoriFilter = k },
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (selected) BRAND else Color.Transparent,
+                            border = if (selected) null
+                                else BorderStroke(1.5.dp, borderColor())
+                        ) {
+                            Text(
+                                k ?: "Semua",
+                                modifier = Modifier.padding(
+                                    horizontal = Sp.lg, vertical = Sp.sm
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (selected) FontWeight.SemiBold
+                                    else FontWeight.Medium,
+                                color = if (selected) Color.White
+                                    else MaterialTheme.colorScheme.onSurface
+                            )
                         }
                     }
                 }
             }
 
-            // ── Konten tab ──
-            if (tabIndex == 0 || !bundlingEnabled || bundles.isEmpty()) {
-                // ─── MENU BIASA ───
-                if (kategoriList.size > 1) {
-                    LazyRow(
-                        contentPadding = PaddingValues(
-                            horizontal = Sp.md, vertical = Sp.xs
-                        ),
-                        horizontalArrangement = Arrangement.spacedBy(Sp.xs)
+            Spacer(Modifier.height(Sp.lg))
+
+            // ═══ TITLE "Menu" / "Paket" ═══
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = Sp.lg),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (tabIndex == 1 && bundlingEnabled) "Paket" else "Menu",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.weight(1f)
+                )
+                if (bundlingEnabled && bundles.isNotEmpty()) {
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(3.dp)
                     ) {
-                        items(kategoriList.size) { i ->
-                            val k = kategoriList[i]
-                            FilterChip(
-                                selected = k == vm.kategoriFilter,
-                                onClick = { vm.kategoriFilter = k },
-                                label = { Text(k ?: "Semua",
-                                    style = MaterialTheme.typography.bodySmall) },
-                                modifier = Modifier.height(32.dp))
-                        }
+                        MiniTab("Menu", tabIndex == 0) { tabIndex = 0 }
+                        MiniTab("Paket", tabIndex == 1) { tabIndex = 1 }
                     }
                 }
+            }
 
+            Spacer(Modifier.height(Sp.md))
+
+            // ═══ KONTEN GRID ═══
+            val kolom = if (isTablet) 3 else 2
+
+            if (tabIndex == 0 || !bundlingEnabled || bundles.isEmpty()) {
                 if (filteredMenu.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text(if (menu.isEmpty()) "Belum ada menu"
-                            else "Menu tidak ditemukan")
+                            else "Menu tidak ditemukan",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    val kolom = if (isTablet) 3 else 2
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(kolom),
-                        contentPadding = PaddingValues(Sp.md),
-                        verticalArrangement = Arrangement.spacedBy(Sp.sm),
-                        horizontalArrangement = Arrangement.spacedBy(Sp.sm)
+                        contentPadding = PaddingValues(
+                            start = Sp.lg, end = Sp.lg,
+                            top = 0.dp, bottom = 120.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(Sp.md),
+                        horizontalArrangement = Arrangement.spacedBy(Sp.md)
                     ) {
                         items(filteredMenu, key = { it.id }) { m ->
-                            MenuCard(m, enabled = m.tersedia) { vm.add(m) }
+                            MenuCardNew(m, enabled = m.tersedia) { vm.add(m) }
                         }
                     }
                 }
             } else {
-                // ─── BUNDLE ───
                 if (filteredBundles.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("Belum ada paket bundling",
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 } else {
-                    val kolom = if (isTablet) 3 else 2
                     LazyVerticalGrid(
                         columns = GridCells.Fixed(kolom),
-                        contentPadding = PaddingValues(Sp.md),
-                        verticalArrangement = Arrangement.spacedBy(Sp.sm),
-                        horizontalArrangement = Arrangement.spacedBy(Sp.sm)
+                        contentPadding = PaddingValues(
+                            start = Sp.lg, end = Sp.lg,
+                            top = 0.dp, bottom = 120.dp
+                        ),
+                        verticalArrangement = Arrangement.spacedBy(Sp.md),
+                        horizontalArrangement = Arrangement.spacedBy(Sp.md)
                     ) {
                         items(filteredBundles, key = { it.id }) { b ->
                             BundleMenuCard(
                                 bundle = b,
-                                onTap = {
-                                    val tipe = BundleTipe.fromId(b.tipe)
-                                    if (tipe == BundleTipe.FIXED) {
-                                        // Auto-pick untuk FIXED
-                                        val autoPicks = mutableListOf<BundlePick>()
-                                        // Karena FIXED datanya di group & items, ini butuh load
-                                        // Untuk MVP, FIXED buka dialog juga biar konsisten
-                                        pickerBundle = b
-                                    } else {
-                                        pickerBundle = b
-                                    }
-                                },
+                                onTap = { pickerBundle = b },
                                 onLongPress = {
                                     if (Session.can(PermissionKey.KELOLA_MENU))
                                         onBundleEdit(b.id)
@@ -1239,6 +1293,23 @@ fun MenuPane(
                 pickerBundle = null
             }
         )
+    }
+}
+
+// ═══ MINI TAB UNTUK TOGGLE MENU/PAKET ═══
+@Composable
+private fun MiniTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = if (selected) BRAND else Color.Transparent
+    ) {
+        Text(label,
+            modifier = Modifier.padding(horizontal = Sp.md, vertical = 6.dp),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = if (selected) Color.White
+                else MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -1299,54 +1370,138 @@ private fun OrderMetaBar(vm: KasirViewModel) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// MENU CARD (item biasa)
+// MENU CARD (Phase 2 Redesign)
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MenuCard(m: MenuItem, enabled: Boolean, onClick: () -> Unit) {
+private fun MenuCardNew(
+    m: MenuItem,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
     val stokHabis = m.trackStok && m.stok <= 0
     val efektifEnabled = enabled && !stokHabis
-    Card(
-        modifier = Modifier.fillMaxWidth().height(175.dp)
-            .clickable(enabled = efektifEnabled, onClick = onClick),
-        shape = RoundedCornerShape(Rd.md)
+
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1f,
+        animationSpec = tween(120),
+        label = "scale"
+    )
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .scale(scale)
+            .clip(RoundedCornerShape(16.dp))
+            .background(surfaceCard())
+            .clickable(
+                enabled = efektifEnabled,
+                onClick = onClick
+            )
     ) {
         Column {
-            Box(Modifier.fillMaxWidth().height(100.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant)) {
-                m.fotoUri?.let { uri ->
-                    AsyncImage(model = uri, contentDescription = m.nama,
+            // ═══ FOTO ═══
+            Box(
+                Modifier.fillMaxWidth().height(130.dp)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                if (m.fotoUri != null) {
+                    AsyncImage(
+                        model = m.fotoUri,
+                        contentDescription = m.nama,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize())
-                }
-                if (!efektifEnabled) {
-                    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Box(Modifier.fillMaxSize(),
                         contentAlignment = Alignment.Center) {
-                        Text(if (stokHabis) "Stok Habis" else "Habis",
-                            color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("🍽️",
+                            style = MaterialTheme.typography.displayMedium)
                     }
                 }
+
+                if (!efektifEnabled) {
+                    Box(
+                        Modifier.fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.55f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            if (stokHabis) "Stok Habis" else "Habis",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                }
+
                 if (m.trackStok && !stokHabis) {
                     Surface(
-                        modifier = Modifier.padding(6.dp).align(Alignment.TopEnd),
+                        modifier = Modifier.padding(8.dp).align(Alignment.TopEnd),
                         color = if (m.stok <= m.stokMinimal) DANGER else BRAND,
-                        shape = RoundedCornerShape(Rd.xs)
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Text("${m.stok}",
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            modifier = Modifier.padding(
+                                horizontal = 8.dp, vertical = 3.dp
+                            ),
                             color = Color.White,
-                            style = MaterialTheme.typography.labelSmall,
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold)
                     }
                 }
             }
-            Column(Modifier.padding(Sp.sm)) {
-                Text(m.nama, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    fontWeight = FontWeight.SemiBold,
-                    style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(2.dp))
-                Text(m.harga.rupiah(), color = BRAND, fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.bodyMedium)
+
+            // ═══ INFO ═══
+            Column(
+                Modifier.fillMaxWidth().padding(Sp.md)
+            ) {
+                Text(
+                    m.kategori.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(4.dp))
+
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            m.nama,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            m.harga.rupiah(),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = BRAND
+                        )
+                    }
+                    Spacer(Modifier.width(Sp.sm))
+
+                    Box(
+                        Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (efektifEnabled) BRAND
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Add, null,
+                            tint = if (efektifEnabled) Color.White
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -1375,9 +1530,9 @@ private fun BundleMenuCard(
                 onClick = onTap,
                 onLongClick = onLongPress
             ),
-        shape = RoundedCornerShape(Rd.md),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = surfaceCard()
         )
     ) {
         Column {
@@ -1400,7 +1555,6 @@ private fun BundleMenuCard(
                     }
                 }
 
-                // Badge tipe
                 Surface(
                     modifier = Modifier.padding(6.dp).align(Alignment.TopStart),
                     color = badgeColor,
@@ -1415,7 +1569,6 @@ private fun BundleMenuCard(
                     )
                 }
 
-                // Badge hemat
                 if (bundle.hargaAsli > bundle.hargaBundle) {
                     Surface(
                         modifier = Modifier.padding(6.dp).align(Alignment.TopEnd),
@@ -1448,8 +1601,7 @@ private fun BundleMenuCard(
                         Text(bundle.hargaAsli.rupiah(),
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textDecoration =
-                                androidx.compose.ui.text.style.TextDecoration.LineThrough)
+                            textDecoration = TextDecoration.LineThrough)
                     }
                 }
             }
@@ -1474,14 +1626,13 @@ private fun BundlePickerDialog(
     var itemsMap by remember { mutableStateOf<Map<Long, List<MenuBundleItem>>>(emptyMap()) }
     var loading by remember { mutableStateOf(true) }
 
-    // Pilihan user: groupId -> list of (itemId)
     var picks by remember { mutableStateOf<Map<Long, Set<Long>>>(emptyMap()) }
 
     val menuById = remember(menuList) { menuList.associateBy { it.id } }
 
     LaunchedEffect(bundle.id) {
         loading = true
-        // ⬇️ PATCH 3B: pakai vm.loadBundleFull() bukan vm.bundleRepoLocal
+        // ⬇️ PATCH 3B: pakai vm.loadBundleFull()
         val (_, gs, im) = vm.loadBundleFull(bundle.id)
         // ⬆️ END PATCH 3B
         groups = gs
@@ -1495,9 +1646,10 @@ private fun BundlePickerDialog(
             if (defaults.isNotEmpty()) {
                 initial[g.id] = defaults
             } else if (g.minPilih > 0) {
-    // Auto-pick first minPilih items kalau nggak ada default
-    initial[g.id] = items.take(g.minPilih).map { it.id }.toSet()
-}
+                // ⬆️ PATCH FIX 2: hapus g.tipe?.let { true } != false &&
+                // Auto-pick first minPilih items kalau nggak ada default
+                initial[g.id] = items.take(g.minPilih).map { it.id }.toSet()
+            }
         }
         picks = initial
         loading = false
@@ -1629,7 +1781,6 @@ private fun BundlePickerDialog(
 
                     HorizontalDivider()
 
-                    // Total
                     Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
                         Column(Modifier.padding(Sp.md)) {
                             Row {
@@ -1666,7 +1817,6 @@ private fun BundlePickerDialog(
         confirmButton = {
             TextButton(
                 onClick = {
-                    // Build picks list
                     val result = mutableListOf<BundlePick>()
                     picks.forEach { (gid, itemIds) ->
                         val g = groups.firstOrNull { it.id == gid } ?: return@forEach
@@ -1957,7 +2107,6 @@ private fun CartLineItem(
                 }
             }
 
-            // Note untuk item biasa
             if (!line.isBundle && line.catatan.isNotBlank()) {
                 Spacer(Modifier.height(Sp.xs))
                 Surface(color = BRAND_LIGHT, shape = RoundedCornerShape(Rd.xs)) {
@@ -1967,7 +2116,6 @@ private fun CartLineItem(
                 }
             }
 
-            // Expand bundle sub-items
             AnimatedVisibility(visible = expanded && line.isBundle) {
                 Column(
                     Modifier.fillMaxWidth()
@@ -2022,6 +2170,7 @@ private fun CartLineItem(
         }
     }
 }
+
 
 // ═══════════════════════════════════════════════════════════
 // DISKON DIALOG
@@ -3235,7 +3384,6 @@ private fun OrderDetailDialog(
     val printerEnabled = FeatureManager.isEnabled(FeatureKey.PRINTER_BT)
     val waEnabled = FeatureManager.isEnabled(FeatureKey.WHATSAPP_INTENT)
 
-    // Kelompokkan bundle
     val grouped = remember(items) {
         val bundleItems = mutableMapOf<Long, MutableList<OrderItem>>()
         val normalItems = mutableListOf<OrderItem>()
@@ -3269,7 +3417,6 @@ private fun OrderDetailDialog(
                 .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(6.dp)) {
 
-                // ── Item biasa ──
                 grouped.first.forEach { it ->
                     Row {
                         Text("${it.qty}x", Modifier.width(36.dp),
@@ -3288,7 +3435,6 @@ private fun OrderDetailDialog(
                     }
                 }
 
-                // ── Bundle ──
                 grouped.second.forEach { (bundleId, bundleItems) ->
                     val mainItem = bundleItems.firstOrNull { it.menuId == 0L }
                     if (mainItem != null) {
@@ -3490,8 +3636,9 @@ private fun AlasanDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text("Batal") } })
 }
 
+
 // ═══════════════════════════════════════════════════════════
-// DASHBOARD
+// DASHBOARD — Phase 4 Redesign
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -3511,100 +3658,205 @@ fun DashboardScreen(vm: DashboardViewModel) {
     val labaKotor = omzet - hpp
     val labaBersih = labaKotor - pengeluaran
 
-    Scaffold(topBar = { TopAppBar(title = { Text("Dashboard") }) }) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(Sp.lg),
-            verticalArrangement = Arrangement.spacedBy(Sp.md)) {
+    val user = Session.current
+    val today = remember {
+        java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale("id"))
+            .format(java.util.Date())
+    }
 
-            item {
-                Text("Hari Ini", style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold)
-            }
+    Scaffold(
+        containerColor = MaterialTheme.colorScheme.background
+    ) { pad ->
+        LazyColumn(
+            Modifier.padding(pad).fillMaxSize(),
+            contentPadding = PaddingValues(bottom = Sp.xxxl),
+            verticalArrangement = Arrangement.spacedBy(Sp.md)
+        ) {
 
+            // ═══ HEADER ═══
             item {
-                Row(horizontalArrangement = Arrangement.spacedBy(Sp.md)) {
-                    StatCard("Transaksi", trx.toString(),
-                        Icons.Default.Receipt, Modifier.weight(1f))
-                    StatCard("Omzet", omzet.rupiah(),
-                        Icons.Default.AttachMoney, Modifier.weight(1f))
+                Row(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = Sp.lg, vertical = Sp.lg),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Dashboard",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(2.dp))
+                        Text("Hari ini, $today",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Box(
+                        Modifier.size(48.dp).clip(CircleShape).background(BRAND),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            user?.nama?.take(2)?.uppercase() ?: "JD",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
                 }
             }
 
+            // ═══ 2 CARD TOP: Transaksi + Omzet ═══
             item {
-                Card(
-                    shape = Rd.cardLg,
-                    elevation = CardDefaults.cardElevation(defaultElevation = El.card),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (labaBersih >= 0)
-                            SUCCESS.copy(alpha = 0.12f)
-                        else DANGER.copy(alpha = 0.12f)
-                    )
+                Row(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = Sp.lg),
+                    horizontalArrangement = Arrangement.spacedBy(Sp.md)
                 ) {
-                    Column(Modifier.padding(Sp.lg),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.TrendingUp, null,
-                                tint = if (labaBersih >= 0) SUCCESS else DANGER)
-                            Spacer(Modifier.width(Sp.sm))
-                            Text("Laba Bersih Hari Ini",
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleSmall)
-                        }
-                        Text(labaBersih.rupiah(),
-                            style = MaterialTheme.typography.headlineMedium,
+                    DashCard(
+                        modifier = Modifier.weight(1f),
+                        bgColor = surfaceCard(),
+                        iconBg = BRAND.copy(alpha = 0.2f),
+                        icon = Icons.Default.Receipt,
+                        label = "Transaksi",
+                        value = trx.toString(),
+                        delta = null
+                    )
+
+                    DashCard(
+                        modifier = Modifier.weight(1f),
+                        bgColor = null,
+                        gradient = listOf(BRAND, BRAND_DARK),
+                        iconBg = Color.White.copy(alpha = 0.2f),
+                        icon = Icons.Default.AccountBalanceWallet,
+                        label = "Omzet",
+                        value = omzet.rupiah(),
+                        delta = null,
+                        isPrimary = true
+                    )
+                }
+            }
+
+            // ═══ CARD LABA BERSIH ═══
+            item {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = Sp.lg)
+                        .clip(Rd.cardLg)
+                        .background(surfaceCard())
+                        .border(1.dp, borderColor(), Rd.cardLg)
+                        .padding(Sp.lg)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Laba Bersih Hari Ini",
+                            style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (labaBersih >= 0) SUCCESS else DANGER)
-                        Text("Omzet − HPP − Pengeluaran",
-                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier.weight(1f))
+                        Icon(Icons.Default.Info, null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp))
+                    }
+                    Spacer(Modifier.height(Sp.sm))
+                    Text(
+                        (if (labaBersih >= 0) "+ " else "- ") +
+                            kotlin.math.abs(labaBersih).rupiah(),
+                        style = MaterialTheme.typography.displaySmall,
+                        fontWeight = FontWeight.Black,
+                        color = if (labaBersih >= 0) Color(0xFF2EBD59) else DANGER
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text("vs kemarin",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(Sp.md))
+                    MiniLineChart(grafik)
+                }
+            }
+
+            // ═══ RINCIAN HEADER ═══
+            item {
+                Row(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = Sp.lg, vertical = Sp.sm),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Rincian",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.weight(1f))
+                    Row(
+                        Modifier.clickable { /* TODO: lihat semua */ },
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Lihat semua",
+                            color = BRAND,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.Default.ChevronRight, null,
+                            tint = BRAND, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            // ═══ RINCIAN TOTAL ═══
+            item {
+                Column(
+                    Modifier.fillMaxWidth()
+                        .padding(horizontal = Sp.lg)
+                        .clip(Rd.card)
+                        .background(surfaceCard())
+                        .border(1.dp, borderColor(), Rd.card)
+                        .padding(Sp.lg),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    RincianRow("Omzet", omzet.rupiah(),
+                        MaterialTheme.colorScheme.onSurface)
+                    RincianRow("HPP (Modal)", "- ${hpp.rupiah()}", DANGER)
+                    HorizontalDivider(Modifier.padding(vertical = Sp.xs),
+                        color = borderColor())
+                    RincianRow("Laba Kotor", labaKotor.rupiah(), Color(0xFF2EBD59))
+                    RincianRow("Pengeluaran", "- ${pengeluaran.rupiah()}", DANGER)
+                    HorizontalDivider(Modifier.padding(vertical = Sp.xs),
+                        color = borderColor())
+                    RincianRow("Laba Bersih", labaBersih.rupiah(),
+                        if (labaBersih >= 0) Color(0xFF2EBD59) else DANGER,
+                        bold = true)
+                    if (diskon > 0 || pajak > 0) {
+                        Spacer(Modifier.height(Sp.xs))
+                        if (diskon > 0) RincianRow("Diskon", diskon.rupiah(),
+                            MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (pajak > 0) RincianRow("PPN", pajak.rupiah(),
+                            MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+
+            // ═══ TRANSAKSI LIST ═══
+            item {
+                Text("Transaksi Terakhir",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(
+                        start = Sp.lg, top = Sp.md, bottom = Sp.sm
+                    ))
+            }
+
+            if (recent.isEmpty()) {
+                item {
+                    Box(
+                        Modifier.fillMaxWidth().padding(Sp.xl),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("Belum ada transaksi hari ini",
+                            style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
-            }
-
-            item {
-                Card(
-                    shape = Rd.card,
-                    elevation = CardDefaults.cardElevation(defaultElevation = El.card)
-                ) {
-                    Column(Modifier.padding(Sp.lg),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Rincian", fontWeight = FontWeight.SemiBold)
-                        RingkasLine("Omzet", omzet.rupiah())
-                        RingkasLine("HPP (Modal)", "- ${hpp.rupiah()}", DANGER)
-                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                        RingkasLine("Laba Kotor", labaKotor.rupiah(), SUCCESS)
-                        RingkasLine("Pengeluaran", "- ${pengeluaran.rupiah()}", DANGER)
-                        HorizontalDivider(Modifier.padding(vertical = 4.dp))
-                        RingkasLine("Laba Bersih", labaBersih.rupiah(),
-                            if (labaBersih >= 0) SUCCESS else DANGER)
-                        if (diskon > 0 || pajak > 0) {
-                            Spacer(Modifier.height(Sp.xs))
-                            if (diskon > 0) RingkasLine("Diskon", diskon.rupiah())
-                            if (pajak > 0) RingkasLine("PPN", pajak.rupiah())
-                        }
-                    }
+            } else {
+                items(recent.take(10), key = { it.id }) { order ->
+                    TransaksiRow(order)
                 }
             }
 
+            // ═══ GRAFIK & TOP LIST ═══
             if (FeatureManager.isEnabled(FeatureKey.GRAFIK)) {
-                item {
-                    Card(
-                        shape = Rd.card,
-                        elevation = CardDefaults.cardElevation(defaultElevation = El.card)
-                    ) {
-                        Column(Modifier.padding(Sp.lg)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.BarChart, null, tint = BRAND)
-                                Spacer(Modifier.width(Sp.sm))
-                                Text("Penjualan 7 Hari",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold)
-                            }
-                            Spacer(Modifier.height(Sp.md))
-                            BarChart7Hari(grafik)
-                        }
-                    }
-                }
                 if (topMenu.isNotEmpty()) {
                     item {
                         TopList("🏆 Top 5 Menu", topMenu.map {
@@ -3628,49 +3880,171 @@ fun DashboardScreen(vm: DashboardViewModel) {
                     }
                 }
             }
-
-            item {
-                Spacer(Modifier.height(Sp.sm))
-                Text("Transaksi Terakhir", fontWeight = FontWeight.SemiBold)
-            }
-            if (recent.isEmpty()) {
-                item {
-                    Text("Belum ada transaksi hari ini",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            } else {
-                items(recent.take(20), key = { it.id }) { order ->
-                    Card(
-                        shape = Rd.card,
-                        elevation = CardDefaults.cardElevation(defaultElevation = El.card)
-                    ) {
-                        Row(Modifier.padding(Sp.md),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    order.timestamp.jamPendek() + " • " +
-                                    PaymentMethod.fromId(order.metodeBayar).label,
-                                    fontWeight = FontWeight.SemiBold)
-                                Text(
-                                    if (order.memberNama.isNotBlank())
-                                        "⭐ ${order.memberNama}"
-                                    else if (order.nomorMeja.isNotBlank())
-                                        "Meja ${order.nomorMeja}"
-                                    else "Tanpa meja",
-                                    style = MaterialTheme.typography.bodySmall)
-                            }
-                            Text(order.total.rupiah(),
-                                fontWeight = FontWeight.Bold, color = BRAND)
-                        }
-                    }
-                }
-            }
-
-            item { Spacer(Modifier.height(Sp.xxl)) }
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════
+// DASHBOARD COMPOSABLE — Phase 4
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun DashCard(
+    modifier: Modifier = Modifier,
+    bgColor: Color? = null,
+    gradient: List<Color>? = null,
+    iconBg: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    value: String,
+    delta: String?,
+    isPrimary: Boolean = false
+) {
+    val bgModifier = if (gradient != null) {
+        Modifier.background(Brush.linearGradient(gradient), Rd.cardLg)
+    } else {
+        Modifier.background(bgColor ?: surfaceCard(), Rd.cardLg)
+    }
+
+    Column(
+        modifier
+            .clip(Rd.cardLg)
+            .then(bgModifier)
+            .then(if (gradient == null)
+                Modifier.border(1.dp, borderColor(), Rd.cardLg)
+            else Modifier)
+            .padding(Sp.lg)
+    ) {
+        Box(
+            Modifier.size(40.dp).clip(RoundedCornerShape(12.dp))
+                .background(iconBg),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, null,
+                tint = if (isPrimary) Color.White else BRAND,
+                modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.height(Sp.md))
+        Text(label,
+            style = MaterialTheme.typography.labelMedium,
+            color = if (isPrimary) Color.White.copy(alpha = 0.85f)
+                else MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.height(4.dp))
+        Text(value,
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Black,
+            color = if (isPrimary) Color.White
+                else MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis)
+        if (delta != null) {
+            Spacer(Modifier.height(Sp.xs))
+            Text("▲ $delta",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (isPrimary) Color.White.copy(alpha = 0.9f)
+                    else Color(0xFF2EBD59),
+                fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun MiniLineChart(data: List<HariPenjualan>) {
+    val points = remember(data) {
+        if (data.isEmpty()) listOf(0, 0, 0, 0, 0, 0, 0)
+        else data.map { it.omzet }
+    }
+    val maxVal = (points.maxOrNull() ?: 1).coerceAtLeast(1)
+    val lineColor = Color(0xFF2EBD59)
+
+    Canvas(
+        Modifier.fillMaxWidth().height(60.dp)
+    ) {
+        if (points.size < 2) return@Canvas
+        val stepX = size.width / (points.size - 1)
+        val path = Path()
+        points.forEachIndexed { i, v ->
+            val x = i * stepX
+            val y = size.height - (v.toFloat() / maxVal) * size.height
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        drawPath(
+            path = path,
+            color = lineColor,
+            style = Stroke(
+                width = 3f,
+                cap = StrokeCap.Round,
+                join = StrokeJoin.Round
+            )
+        )
+    }
+}
+
+@Composable
+private fun RincianRow(
+    label: String,
+    value: String,
+    valueColor: Color = Color.Unspecified,
+    bold: Boolean = false
+) {
+    Row {
+        Text(label,
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = if (bold) FontWeight.Black else FontWeight.SemiBold,
+            color = if (valueColor == Color.Unspecified)
+                MaterialTheme.colorScheme.onSurface else valueColor)
+    }
+}
+
+@Composable
+private fun TransaksiRow(order: Order) {
+    Row(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = Sp.lg, vertical = Sp.sm),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(44.dp).clip(CircleShape)
+                .background(BRAND.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.ShoppingBag, null,
+                tint = BRAND,
+                modifier = Modifier.size(22.dp))
+        }
+        Spacer(Modifier.width(Sp.md))
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (order.memberNama.isNotBlank()) order.memberNama
+                else PaymentMethod.fromId(order.metodeBayar).label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text("Hari ini • ${order.timestamp.jamPendek()}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text(order.total.rupiah(),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Black,
+            color = BRAND)
+    }
+    HorizontalDivider(
+        Modifier.padding(start = 72.dp, end = Sp.lg),
+        color = borderColor(),
+        thickness = 0.5.dp
+    )
+}
+
+// ═══════════════════════════════════════════════════════════
+// LEGACY COMPOSABLE (dipertahankan buat backward-compat)
+// ═══════════════════════════════════════════════════════════
 
 @Composable
 private fun RingkasLine(label: String, value: String,
@@ -3689,50 +4063,74 @@ private fun RingkasLine(label: String, value: String,
 
 @Composable
 private fun TopList(title: String, items: List<Triple<String, String, Int>>) {
-    Card(
-        shape = Rd.card,
-        elevation = CardDefaults.cardElevation(defaultElevation = El.card)
+    Column(
+        Modifier.fillMaxWidth()
+            .padding(horizontal = Sp.lg)
+            .clip(Rd.card)
+            .background(surfaceCard())
+            .border(1.dp, borderColor(), Rd.card)
+            .padding(Sp.lg)
     ) {
-        Column(Modifier.padding(Sp.lg)) {
-            Text(title, style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(Sp.md))
-            items.forEachIndexed { idx, (nama, qty, omzet) ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        color = when (idx) {
-                            0 -> Color(0xFFFFD54F)
-                            1 -> Color(0xFFCFD8DC)
-                            2 -> Color(0xFFFFAB91)
-                            else -> MaterialTheme.colorScheme.surfaceVariant
-                        },
-                        shape = RoundedCornerShape(Rd.xs)
-                    ) {
-                        Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
-                            Text("${idx + 1}", fontWeight = FontWeight.Bold,
-                                color = Color(0xFF424242))
-                        }
+        Text(title, style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(Sp.md))
+        items.forEachIndexed { idx, (nama, qty, omzet) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Surface(
+                    color = when (idx) {
+                        0 -> Color(0xFFFFD54F)
+                        1 -> Color(0xFFCFD8DC)
+                        2 -> Color(0xFFFFAB91)
+                        else -> BRAND.copy(alpha = 0.15f)
+                    },
+                    shape = RoundedCornerShape(Rd.xs)
+                ) {
+                    Box(Modifier.size(28.dp), contentAlignment = Alignment.Center) {
+                        Text("${idx + 1}",
+                            fontWeight = FontWeight.Bold,
+                            color = if (idx < 3) Color(0xFF424242)
+                                else MaterialTheme.colorScheme.onSurface)
                     }
-                    Spacer(Modifier.width(Sp.md))
-                    Column(Modifier.weight(1f)) {
-                        Text(nama, fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.bodyMedium)
-                        Text(qty, style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    Text(omzet.rupiah(),
-                        fontWeight = FontWeight.Bold, color = BRAND,
-                        style = MaterialTheme.typography.bodyMedium)
                 }
+                Spacer(Modifier.width(Sp.md))
+                Column(Modifier.weight(1f)) {
+                    Text(nama, fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.bodyMedium)
+                    Text(qty, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                Text(omzet.rupiah(),
+                    fontWeight = FontWeight.Bold, color = BRAND,
+                    style = MaterialTheme.typography.bodyMedium)
             }
         }
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-// BAR CHART 7 HARI
-// ═══════════════════════════════════════════════════════════
+@Composable
+private fun StatCard(
+    label: String, value: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier,
+        shape = Rd.card,
+        elevation = CardDefaults.cardElevation(defaultElevation = El.card),
+        colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)
+    ) {
+        Column(Modifier.padding(Sp.lg)) {
+            Icon(icon, null, tint = BRAND)
+            Spacer(Modifier.height(Sp.sm))
+            Text(label, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold, color = BRAND)
+        }
+    }
+}
+
 @Composable
 private fun BarChart7Hari(data: List<HariPenjualan>) {
     if (data.isEmpty() || data.all { it.omzet == 0 }) {
@@ -3782,31 +4180,5 @@ private fun BarChart7Hari(data: List<HariPenjualan>) {
         Spacer(Modifier.height(Sp.sm))
         Text("Tertinggi: ${maxOmzet.rupiah()}",
             style = MaterialTheme.typography.labelSmall, color = labelColor)
-    }
-}
-
-// ═══════════════════════════════════════════════════════════
-// STAT CARD
-// ═══════════════════════════════════════════════════════════
-@Composable
-private fun StatCard(
-    label: String, value: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    modifier: Modifier = Modifier
-) {
-    Card(
-        modifier,
-        shape = Rd.card,
-        elevation = CardDefaults.cardElevation(defaultElevation = El.card),
-        colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)
-    ) {
-        Column(Modifier.padding(Sp.lg)) {
-            Icon(icon, null, tint = BRAND)
-            Spacer(Modifier.height(Sp.sm))
-            Text(label, style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(value, style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold, color = BRAND)
-        }
     }
 }
