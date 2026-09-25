@@ -1,6 +1,7 @@
 package com.iyonzkasir.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -9,6 +10,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -47,7 +49,22 @@ object El {
     val cardHover = 2.dp
     val fab = 4.dp
     val modal = 8.dp
+    val none = 0.dp   // ⬅️ PATCH 2A
 }
+
+// ═══ DARK MODE SURFACE COLORS ═══  ⬅️ PATCH 2A
+@Composable
+fun surfaceCard(): Color = if (isSystemInDarkTheme())
+    com.iyonzkasir.SURFACE_DARK else MaterialTheme.colorScheme.surface
+
+@Composable
+fun surfaceCardAlt(): Color = if (isSystemInDarkTheme())
+    com.iyonzkasir.SURFACE_DARK_2 else MaterialTheme.colorScheme.surfaceVariant
+
+@Composable
+fun borderColor(): Color = if (isSystemInDarkTheme())
+    com.iyonzkasir.BORDER_DARK else MaterialTheme.colorScheme.outlineVariant
+// ⬆️ END PATCH 2A
 
 // ═══ EMPTY STATE ═══
 @Composable
