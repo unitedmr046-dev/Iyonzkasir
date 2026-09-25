@@ -1042,6 +1042,7 @@ fun PosScreen(
 // MENU PANE — Phase 2 Redesign
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
+@Composable
 fun MenuPane(
     vm: KasirViewModel,
     modifier: Modifier = Modifier,
