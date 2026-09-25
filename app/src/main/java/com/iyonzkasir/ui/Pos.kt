@@ -15,8 +15,8 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -1039,8 +1039,7 @@ fun PosScreen(
 // ═══════════════════════════════════════════════════════════
 // MENU PANE — Phase 2 Redesign
 // ═══════════════════════════════════════════════════════════
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
-@Composable
+@OptIn(ExperimentalMaterial3Api::class)
 fun MenuPane(
     vm: KasirViewModel,
     modifier: Modifier = Modifier,
@@ -1372,7 +1371,7 @@ private fun OrderMetaBar(vm: KasirViewModel) {
 // ═══════════════════════════════════════════════════════════
 // MENU CARD (Phase 2 Redesign)
 // ═══════════════════════════════════════════════════════════
-@OptIn(ExperimentalFoundationApi::class)
+
 @Composable
 private fun MenuCardNew(
     m: MenuItem,
@@ -1510,7 +1509,7 @@ private fun MenuCardNew(
 // ═══════════════════════════════════════════════════════════
 // BUNDLE MENU CARD
 // ═══════════════════════════════════════════════════════════
-@OptIn(ExperimentalFoundationApi::class)
+
 @Composable
 private fun BundleMenuCard(
     bundle: MenuBundle,
@@ -1526,10 +1525,12 @@ private fun BundleMenuCard(
 
     Card(
         modifier = Modifier.fillMaxWidth().height(185.dp)
-            .combinedClickable(
-                onClick = onTap,
-                onLongClick = onLongPress
-            ),
+        .pointerInput(Unit) {
+    detectTapGestures(
+        onTap = { onTap() },
+        onLongPress = { onLongPress() }
+    )
+},
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = surfaceCard()
