@@ -25,7 +25,7 @@ enum class AppTheme(
     val darkHex: Long,
     val emoji: String
 ) {
-    ORANGE("orange", "Orange", 0xFFFF6B35, 0xFFFFE4D6, 0xFFC44E1F, "🟧"),
+    ORANGE("orange", "Orange", 0xFFFF6B2C, 0xFF2A1810, 0xFFE55A1F, "🟧"),
     HIJAU("hijau", "Hijau", 0xFF2E7D32, 0xFFC8E6C9, 0xFF1B5E20, "🟩"),
     BIRU("biru", "Biru", 0xFF1976D2, 0xFFBBDEFB, 0xFF0D47A1, "🟦"),
     UNGU("ungu", "Ungu", 0xFF7B1FA2, 0xFFE1BEE7, 0xFF4A148C, "🟪"),
@@ -60,6 +60,13 @@ val BRAND_DARK: Color get() = BrandColors.primaryDark
 val SUCCESS = Color(0xFF2E7D32)
 val WARNING = Color(0xFFF57C00)
 val DANGER = Color(0xFFD32F2F)
+
+// ═══════ DARK MODE SURFACES ═══════
+val BG_DARK = Color(0xFF0F0F0F)        // background utama
+val SURFACE_DARK = Color(0xFF1A1A1A)   // card background
+val SURFACE_DARK_2 = Color(0xFF232323) // card elevated
+val BORDER_DARK = Color(0xFF2E2E2E)    // border halus
+val TEXT_MUTED = Color(0xFF8A8A8A)     // text sekunder
 
 // ═══════ EXTENSIONS ═══════
 fun Int.rupiah(): String =
@@ -147,7 +154,7 @@ enum class PaymentMethod(val id: String, val label: String) {
     }
 }
 
-// ═══════ BUNDLE / PAKET ═══════  ⬅️ PATCH 1A
+// ═══════ BUNDLE / PAKET ═══════
 enum class BundleTipe(
     val id: String,
     val label: String,
@@ -165,7 +172,6 @@ enum class BundleTipe(
         fun fromId(id: String) = values().firstOrNull { it.id == id } ?: FIXED
     }
 }
-// ⬆️ END PATCH 1A
 
 enum class MemberTier(val id: String, val label: String, val minBelanja: Int) {
     BASIC("BASIC", "Basic", 0),
@@ -209,7 +215,7 @@ enum class FeatureKey(
     PAJAK("pos_pajak", "Pajak / PPN", "POS", "Hitung pajak otomatis"),
     VOID_REFUND("pos_void_refund", "Void / Refund", "POS", "Batalkan transaksi"),
     HOLD_ORDER("pos_hold_order", "Hold Order", "POS", "Tahan pesanan sementara"),
-    BUNDLING("pos_bundling", "Paket & Bundling", "POS", "Paket combo / bundling menu"),  // ⬅️ PATCH 1B
+    BUNDLING("pos_bundling", "Paket & Bundling", "POS", "Paket combo / bundling menu"),
 
     POTONG_STOK("inv_potong_stok", "Potong Stok Otomatis", "Inventaris", "Kurangi stok saat jual"),
     LOW_STOCK_ALERT("inv_low_stock", "Alert Stok Menipis", "Inventaris", "Notifikasi stok minim"),
@@ -444,11 +450,14 @@ fun IyonzTheme(
 
     val colors = if (darkTheme) {
         darkColorScheme(
-            primary = primary, onPrimary = Color.White,
+            primary = primary,
+            onPrimary = Color.White,
             secondary = primaryDark,
-            surfaceVariant = Color(0xFF2A2A2A),
-            background = Color(0xFF121212),
-            surface = Color(0xFF1E1E1E)
+            surfaceVariant = SURFACE_DARK_2,
+            background = BG_DARK,
+            surface = SURFACE_DARK,
+            outline = BORDER_DARK,
+            onSurfaceVariant = TEXT_MUTED
         )
     } else {
         lightColorScheme(
