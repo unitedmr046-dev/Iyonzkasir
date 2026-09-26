@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "22574637641",
+    "project_id": "iyonzkasirapp-8dfd5",
+    "storage_bucket": "iyonzkasirapp-8dfd5.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:22574637641:android:81ca84fad8ea2ffb2d1598",
+        "android_client_info": {
+          "package_name": "com.iyonzkasir"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC2zvHDg4AlXtgcbMduYO1W7IBtWUmAXTY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
