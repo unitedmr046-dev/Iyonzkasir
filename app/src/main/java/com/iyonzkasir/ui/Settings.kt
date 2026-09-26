@@ -79,9 +79,10 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     val pengeluaranEnabled = FeatureKey.PENGELUARAN in enabled
     val antrianEnabled = FeatureKey.NOMOR_ANTRIAN in enabled
     val printerEnabled = FeatureKey.PRINTER_BT in enabled
+    val bundlingEnabled = FeatureKey.BUNDLING in enabled
 
     val groups = buildList {
-        // TOKO
+        // ═══ TOKO ═══
         val toko = mutableListOf<SettingItem>()
         toko.add(SettingItem(
             key = "profil",
@@ -104,9 +105,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 onClick = { nav.navigate(Routes.KATEGORI) }
             ))
         }
-        // ⬇️⬇️ PATCH: menu Paket Bundling ⬇️⬇️
-        if (FeatureKey.BUNDLING in enabled &&
-            Session.can(PermissionKey.KELOLA_MENU)) {
+        if (bundlingEnabled && Session.can(PermissionKey.KELOLA_MENU)) {
             toko.add(SettingItem(
                 key = "bundling",
                 title = "Paket Bundling",
@@ -116,7 +115,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 onClick = { nav.navigate(Routes.BUNDLING) }
             ))
         }
-        // ⬆️⬆️ END PATCH ⬆️⬆️
         if (Session.can(PermissionKey.KELOLA_USER)) {
             toko.add(SettingItem(
                 key = "user",
@@ -129,7 +127,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         if (toko.isNotEmpty()) add("TOKO" to toko)
 
-        // TRANSAKSI
+        // ═══ TRANSAKSI ═══
         val trx = mutableListOf<SettingItem>()
         trx.add(SettingItem(
             key = "pajak",
@@ -180,6 +178,17 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 onClick = { nav.navigate(Routes.FEATURE_TOGGLE) }
             ))
         }
+        // ── SYNC WEB MENU (BARU) ──
+        if (Session.can(PermissionKey.KELOLA_FITUR)) {
+            trx.add(SettingItem(
+                key = "sync_web",
+                title = "Sinkronisasi Web",
+                subtitle = "Sync menu ke web menu digital",
+                icon = Icons.Default.CloudSync,
+                color = Color(0xFF00897B),
+                onClick = { nav.navigate(Routes.SYNC_WEB) }
+            ))
+        }
         if (crmEnabled) {
             trx.add(SettingItem(
                 key = "crm",
@@ -193,7 +202,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         add("TRANSAKSI" to trx)
 
-        // OUTPUT
+        // ═══ OUTPUT ═══
         val out = mutableListOf<SettingItem>()
         out.add(SettingItem(
             key = "laporan",
@@ -236,7 +245,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         add("OUTPUT" to out)
 
-        // TAMPILAN & SISTEM
+        // ═══ TAMPILAN & SISTEM ═══
         val sys = mutableListOf<SettingItem>()
         sys.add(SettingItem(
             key = "tema",
@@ -266,7 +275,7 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
         }
         add("TAMPILAN & SISTEM" to sys)
 
-        // TENTANG
+        // ═══ TENTANG ═══
         add("TENTANG" to listOf(
             SettingItem(
                 key = "tentang",
@@ -1431,3 +1440,4 @@ fun TentangRoute(nav: NavHostController) {
         }
     }
 }
+
