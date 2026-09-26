@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.devtools.ksp")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -74,4 +75,13 @@ dependencies {
 
     // ── Accompanist Permissions (izin runtime di Compose) ──
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
+
+    // ── Firebase ──
+    implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
+    implementation("com.google.firebase:firebase-analytics")
+    implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-auth-ktx")
+
+    // ── OkHttp (untuk upload ke ImgBB) ──
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
