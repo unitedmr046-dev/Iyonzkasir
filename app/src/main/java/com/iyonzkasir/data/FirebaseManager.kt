@@ -3,32 +3,17 @@ package com.iyonzkasir.data
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreSettings
-import com.google.firebase.firestore.MemoryCacheSettings
-import com.google.firebase.firestore.PersistentCacheSettings
-import com.google.firebase.firestore.ktx.firestoreSettings
-import com.google.firebase.firestore.ktx.memoryCacheSettings
-import com.google.firebase.firestore.ktx.persistentCacheSettings
 import kotlinx.coroutines.tasks.await
 
 /**
- * Singleton untuk Firebase Auth + Firestore instance.
+ * Singleton untuk Firebase Auth + Firestore.
  * Fokus: owner login + sync data.
  */
 object FirebaseManager {
 
     private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
     private val firestore: FirebaseFirestore by lazy {
-        FirebaseFirestore.getInstance().apply {
-            // Cache offline — biar tetap jalan tanpa internet
-            firestoreSettings = firestoreSettings {
-                setLocalCacheSettings(
-                    persistentCacheSettings {
-                        // 100 MB cache
-                    }
-                )
-            }
-        }
+        FirebaseFirestore.getInstance()
     }
 
     val currentUser: FirebaseUser? get() = auth.currentUser
