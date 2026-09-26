@@ -79,8 +79,8 @@ dependencies {
     // ── Firebase ──
     implementation(platform("com.google.firebase:firebase-bom:34.19.0"))
     implementation("com.google.firebase:firebase-analytics")
-    implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-auth")
 
     // ── OkHttp (untuk upload ke ImgBB) ──
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
