@@ -3,6 +3,8 @@ package com.iyonzkasir.data
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.ktx.firestoreSettings
+import com.google.firebase.firestore.ktx.persistentCacheSettings
 import kotlinx.coroutines.tasks.await
 
 /**
@@ -13,7 +15,13 @@ object FirebaseManager {
 
     private val auth: FirebaseAuth by lazy { FirebaseAuth.getInstance() }
     private val firestore: FirebaseFirestore by lazy {
-        FirebaseFirestore.getInstance()
+        FirebaseFirestore.getInstance().apply {
+            firestoreSettings = firestoreSettings {
+                setLocalCacheSettings(persistentCacheSettings {
+                    // Cache offline otomatis (untuk sync tanpa internet)
+                })
+            }
+        }
     }
 
     val currentUser: FirebaseUser? get() = auth.currentUser
