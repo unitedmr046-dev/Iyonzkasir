@@ -125,6 +125,9 @@ object Routes {
     // Bundle / Paket
     const val BUNDLING = "bundling"
     const val BUNDLING_EDIT = "bundling_edit"
+
+    // Sync Web (BARU)
+    const val SYNC_WEB = "sync_web"
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -230,7 +233,7 @@ fun AppRoot(app: IyonzApp) {
         composable(Routes.ANTRIAN) { AntrianRoute(app, nav) }
         composable(Routes.TENTANG) { TentangRoute(nav) }
 
-        // ── Bundle routes (dipakai setelah Bundling.kt dibuat) ──
+        // ── Bundle routes ──
         composable(Routes.BUNDLING) { BundlingRoute(app, nav) }
         composable("${Routes.BUNDLING_EDIT}/{id}") { entry ->
             BundlingEditRoute(
@@ -238,6 +241,9 @@ fun AppRoot(app: IyonzApp) {
                 entry.arguments?.getString("id")?.toLongOrNull()
             )
         }
+
+        // ── Sync Web Route (BARU) ──
+        composable(Routes.SYNC_WEB) { SyncWebRoute(app, nav) }
     }
 }
 
