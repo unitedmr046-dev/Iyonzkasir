@@ -1161,6 +1161,20 @@ class SettingRepository(private val dao: SettingDao) {
     suspend fun getLastBackupName() = get(KEY_LAST_BACKUP_NAME, "")
     suspend fun setLastBackupName(name: String) = set(KEY_LAST_BACKUP_NAME, name)
 
+    // ═══ FIREBASE SYNC ═══
+    suspend fun getStoreId() = get(KEY_STORE_ID, "")
+    suspend fun setStoreId(id: String) = set(KEY_STORE_ID, id)
+    suspend fun getLastSyncTimestamp() =
+        get(KEY_LAST_SYNC, "0").toLongOrNull() ?: 0L
+    suspend fun setLastSyncTimestamp(ts: Long) =
+        set(KEY_LAST_SYNC, ts.toString())
+    suspend fun isSyncEnabled() = get(KEY_SYNC_ENABLED, "0") == "1"
+    suspend fun setSyncEnabled(v: Boolean) = set(KEY_SYNC_ENABLED, if (v) "1" else "0")
+
+    // ═══ IMGBB (untuk upload foto menu) ═══
+    suspend fun getImgbbApiKey() = get(KEY_IMGBB_API_KEY, "")
+    suspend fun setImgbbApiKey(key: String) = set(KEY_IMGBB_API_KEY, key)
+
     suspend fun getPajakDefault() = get(KEY_PAJAK_DEFAULT, "0").toIntOrNull() ?: 0
     suspend fun setPajakDefault(v: Int) = set(KEY_PAJAK_DEFAULT, v.toString())
 
@@ -1243,6 +1257,12 @@ class SettingRepository(private val dao: SettingDao) {
         const val KEY_STRUK_HEADER2 = "struk_header_2"
         const val KEY_STRUK_FOOTER1 = "struk_footer_1"
         const val KEY_STRUK_FOOTER2 = "struk_footer_2"
+
+        // ── Firebase Sync ──
+        const val KEY_STORE_ID = "firebase_store_id"
+        const val KEY_LAST_SYNC = "firebase_last_sync"
+        const val KEY_SYNC_ENABLED = "firebase_sync_enabled"
+        const val KEY_IMGBB_API_KEY = "imgbb_api_key"
     }
 }
 
@@ -1661,9 +1681,3 @@ class MenuBundleRepository(private val dao: MenuBundleDao) {
         return Triple(bundle, groups, itemsMap)
     }
 }
-
-
-
-
-
-
