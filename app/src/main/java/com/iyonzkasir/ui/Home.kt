@@ -796,7 +796,7 @@ private fun ShortcutTile(sc: HomeShortcut, onClick: () -> Unit) {
         Box(
             Modifier
                 .size(56.dp)
-                .clip(RoundedCornerShape(Rd.iconBox))
+                .clip(Rd.iconBox)
                 .background(
                     Brush.linearGradient(
                         colors = listOf(
@@ -808,7 +808,7 @@ private fun ShortcutTile(sc: HomeShortcut, onClick: () -> Unit) {
                 .border(
                     1.dp,
                     sc.color.copy(alpha = 0.15f),
-                    RoundedCornerShape(Rd.iconBox)
+                    Rd.iconBox
                 ),
             contentAlignment = Alignment.Center
         ) {
