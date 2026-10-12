@@ -47,7 +47,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
-// HOME VIEWMODEL (tidak berubah)
+// HOME VIEWMODEL
 // ═══════════════════════════════════════════════════════════
 class HomeViewModel(
     private val posRepo: PosRepository,
