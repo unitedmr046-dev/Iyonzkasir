@@ -329,7 +329,7 @@ fun HomeScreen(
                             Box(
                                 Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(Rd.lg))
+                                    .clip(Rd.cardLg)
                                     .background(
                                         Brush.verticalGradient(
                                             colors = listOf(
@@ -341,7 +341,7 @@ fun HomeScreen(
                                     .border(
                                         1.dp,
                                         Color.White.copy(alpha = 0.28f),
-                                        RoundedCornerShape(Rd.lg)
+                                        Rd.cardLg
                                     )
                                     .padding(Sp.lg)
                             ) {
@@ -693,7 +693,7 @@ fun HomeScreen(
                             .scale(scale)
                             .shadow(
                                 elevation = 12.dp,
-                                shape = RoundedCornerShape(Rd.lg),
+                                shape = Rd.cardLg,
                                 ambientColor = BRAND,
                                 spotColor = BRAND
                             )
@@ -701,7 +701,7 @@ fun HomeScreen(
                                 Brush.horizontalGradient(
                                     colors = listOf(BRAND, BRAND_DARK)
                                 ),
-                                shape = RoundedCornerShape(Rd.lg)
+                                shape = Rd.cardLg
                             )
                             .clickable {
                                 pressed = !pressed
