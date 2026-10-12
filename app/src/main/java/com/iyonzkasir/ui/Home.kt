@@ -6,7 +6,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -30,6 +29,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -47,7 +47,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 // ═══════════════════════════════════════════════════════════
-// HOME VIEWMODEL
+// HOME VIEWMODEL (tidak berubah)
 // ═══════════════════════════════════════════════════════════
 class HomeViewModel(
     private val posRepo: PosRepository,
@@ -235,7 +235,7 @@ fun HomeScreen(
         Box(Modifier.fillMaxSize()) {
             LazyColumn(
                 Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 100.dp)
+                contentPadding = PaddingValues(bottom = 120.dp)
             ) {
                 // ═══ HEADER GRADIENT ═══
                 item {
@@ -253,20 +253,31 @@ fun HomeScreen(
                                 .align(Alignment.Center)
                                 .padding(horizontal = Sp.xl, vertical = Sp.xl)
                         ) {
-                            // Greeting + user
+                            // Greeting + user avatar
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(Modifier.weight(1f)) {
-                                    Text("$greeting,",
+                                    Text(
+                                        "$greeting,",
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = Color.White.copy(alpha = 0.9f))
-                                    Text(user?.nama ?: "Pengguna",
-                                        style = MaterialTheme.typography.titleLarge,
+                                        color = Color.White.copy(alpha = 0.85f)
+                                    )
+                                    Text(
+                                        user?.nama ?: "Pengguna",
+                                        style = MaterialTheme.typography.headlineSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White)
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                                 Box(
-                                    Modifier.size(48.dp).clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.2f)),
+                                    Modifier.size(52.dp).clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.2f))
+                                        .border(
+                                            1.5.dp,
+                                            Color.White.copy(alpha = 0.3f),
+                                            CircleShape
+                                        ),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     if (user?.fotoUri != null) {
@@ -277,39 +288,48 @@ fun HomeScreen(
                                             modifier = Modifier.fillMaxSize()
                                         )
                                     } else {
-                                        Text(user?.nama?.take(1)?.uppercase() ?: "?",
+                                        Text(
+                                            user?.nama?.take(1)?.uppercase() ?: "?",
                                             style = MaterialTheme.typography.titleLarge,
                                             fontWeight = FontWeight.Bold,
-                                            color = Color.White)
+                                            color = Color.White
+                                        )
                                     }
                                 }
                             }
 
-                            Spacer(Modifier.height(8.dp))
-                            Text(namaToko.ifBlank { "Toko Saya" },
+                            Spacer(Modifier.height(Sp.md))
+                            Text(
+                                namaToko.ifBlank { "Toko Saya" },
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White)
+                                color = Color.White
+                            )
                             if (alamatToko.isNotBlank()) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(Icons.Default.LocationOn, null,
+                                    Icon(
+                                        Icons.Default.LocationOn, null,
                                         tint = Color.White.copy(alpha = 0.8f),
-                                        modifier = Modifier.size(14.dp))
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                     Spacer(Modifier.width(4.dp))
-                                    Text(alamatToko,
+                                    Text(
+                                        alamatToko,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color.White.copy(alpha = 0.85f),
-                                        maxLines = 1)
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
 
-                            Spacer(Modifier.height(16.dp))
+                            Spacer(Modifier.height(Sp.lg))
 
-                            // ═══ CARD LAPORAN HARI INI — GLASSMORPHISM ═══
+                            // ═══ LAPORAN HARI INI ═══
                             Box(
                                 Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(24.dp))
+                                    .clip(RoundedCornerShape(Rd.lg))
                                     .background(
                                         Brush.verticalGradient(
                                             colors = listOf(
@@ -321,17 +341,25 @@ fun HomeScreen(
                                     .border(
                                         1.dp,
                                         Color.White.copy(alpha = 0.28f),
-                                        RoundedCornerShape(24.dp)
+                                        RoundedCornerShape(Rd.lg)
                                     )
-                                    .padding(Sp.xl)
+                                    .padding(Sp.lg)
                             ) {
                                 Column {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("Laporan Hari Ini",
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            style = MaterialTheme.typography.titleLarge)
-                                        Spacer(Modifier.weight(1f))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                "Laporan Hari Ini",
+                                                style = MaterialTheme.typography.titleMedium,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                "Ringkasan performa tokomu",
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = Color.White.copy(alpha = 0.75f)
+                                            )
+                                        }
                                         Surface(
                                             onClick = {
                                                 innerNav.navigate(Routes.TAB_DASHBOARD) {
@@ -341,23 +369,27 @@ fun HomeScreen(
                                                     launchSingleTop = true
                                                 }
                                             },
-                                            shape = RoundedCornerShape(20.dp),
-                                            color = Color.White
+                                            shape = RoundedCornerShape(Rd.full),
+                                            color = Color.White.copy(alpha = 0.95f)
                                         ) {
                                             Row(
                                                 Modifier.padding(
                                                     horizontal = Sp.md,
-                                                    vertical = 6.dp
+                                                    vertical = 8.dp
                                                 ),
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
-                                                Text("Lihat Detail",
+                                                Text(
+                                                    "Detail",
                                                     color = BRAND,
                                                     fontWeight = FontWeight.Bold,
-                                                    style = MaterialTheme.typography.labelMedium)
-                                                Icon(Icons.Default.ChevronRight, null,
+                                                    style = MaterialTheme.typography.labelLarge
+                                                )
+                                                Icon(
+                                                    Icons.Default.ChevronRight, null,
                                                     tint = BRAND,
-                                                    modifier = Modifier.size(16.dp))
+                                                    modifier = Modifier.size(16.dp)
+                                                )
                                             }
                                         }
                                     }
@@ -365,32 +397,32 @@ fun HomeScreen(
                                     Spacer(Modifier.height(Sp.lg))
 
                                     if (isTablet) {
-                                        Row {
-                                            HomeStatBig("Omzet", omzet.rupiah(),
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Sp.md)) {
+                                            HomeStatGlass("Omzet", omzet.rupiah(),
                                                 Modifier.weight(1f))
-                                            HomeStatBig("Transaksi", "${trx}x",
+                                            HomeStatGlass("Transaksi", "${trx}x",
                                                 Modifier.weight(1f))
-                                            HomeStatBig("Laba",
+                                            HomeStatGlass("Laba",
                                                 if (laba > 0) laba.rupiah() else "Rp 0",
                                                 Modifier.weight(1f))
-                                            HomeStatBig("Pengeluaran",
+                                            HomeStatGlass("Pengeluaran",
                                                 if (pengeluaran > 0) "- ${pengeluaran.rupiah()}"
                                                 else "Rp 0",
                                                 Modifier.weight(1f))
                                         }
                                     } else {
-                                        Row {
-                                            HomeStatBig("Omzet", omzet.rupiah(),
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Sp.md)) {
+                                            HomeStatGlass("Omzet", omzet.rupiah(),
                                                 Modifier.weight(1f))
-                                            HomeStatBig("Transaksi", "${trx}x",
+                                            HomeStatGlass("Transaksi", "${trx}x",
                                                 Modifier.weight(1f))
                                         }
                                         Spacer(Modifier.height(Sp.md))
-                                        Row {
-                                            HomeStatBig("Laba",
+                                        Row(horizontalArrangement = Arrangement.spacedBy(Sp.md)) {
+                                            HomeStatGlass("Laba",
                                                 if (laba > 0) laba.rupiah() else "Rp 0",
                                                 Modifier.weight(1f))
-                                            HomeStatBig("Pengeluaran",
+                                            HomeStatGlass("Pengeluaran",
                                                 if (pengeluaran > 0) "- ${pengeluaran.rupiah()}"
                                                 else "Rp 0",
                                                 Modifier.weight(1f))
@@ -405,53 +437,74 @@ fun HomeScreen(
                 // ═══ ALERT STOK MENIPIS ═══
                 if (lowStock.isNotEmpty()) {
                     item {
-                        Column(
+                        Box(
                             Modifier.fillMaxWidth()
                                 .widthIn(max = 900.dp)
+                                .padding(
+                                    start = Sp.screenX,
+                                    end = Sp.screenX,
+                                    top = Sp.lg
+                                )
                         ) {
-                            Card(
-                                Modifier.fillMaxWidth().padding(16.dp, 16.dp, 16.dp, 0.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = DANGER.copy(alpha = 0.1f)
-                                ),
-                                shape = RoundedCornerShape(12.dp)
+                            AppCard(
+                                outlined = true,
+                                color = DANGER.copy(alpha = 0.08f)
                             ) {
-                                Column(Modifier.padding(14.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Icon(Icons.Default.Warning, null,
-                                            tint = DANGER,
-                                            modifier = Modifier.size(20.dp))
-                                        Spacer(Modifier.width(8.dp))
-                                        Text("Stok Menipis (${lowStock.size})",
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconCircle(
+                                        icon = Icons.Default.Warning,
+                                        tint = DANGER,
+                                        size = 40.dp,
+                                        iconSize = 20.dp
+                                    )
+                                    Spacer(Modifier.width(Sp.md))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "Stok Menipis",
+                                            style = MaterialTheme.typography.titleSmall,
                                             fontWeight = FontWeight.Bold,
-                                            color = DANGER,
-                                            style = MaterialTheme.typography.titleSmall)
-                                        Spacer(Modifier.weight(1f))
-                                        TextButton(onClick = {
-                                            innerNav.navigate(Routes.TAB_INVENTARIS) {
-                                                popUpTo(innerNav.graph.startDestinationId) {
-                                                    saveState = true
-                                                }
-                                                launchSingleTop = true
-                                            }
-                                        }) {
-                                            Text("Lihat", color = DANGER,
-                                                fontWeight = FontWeight.Bold,
-                                                style = MaterialTheme.typography.bodySmall)
-                                        }
+                                            color = DANGER
+                                        )
+                                        Text(
+                                            "${lowStock.size} menu perlu restock",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                    lowStock.take(3).forEach { m ->
-                                        Row(
-                                            Modifier.fillMaxWidth().padding(vertical = 3.dp)
-                                        ) {
-                                            Text("• ${m.nama}",
-                                                Modifier.weight(1f),
-                                                style = MaterialTheme.typography.bodySmall)
-                                            Text("sisa ${m.stok}",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.Bold,
-                                                color = DANGER)
+                                    TextButton(onClick = {
+                                        innerNav.navigate(Routes.TAB_INVENTARIS) {
+                                            popUpTo(innerNav.graph.startDestinationId) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
                                         }
+                                    }) {
+                                        Text(
+                                            "Lihat",
+                                            color = DANGER,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(Sp.sm))
+                                lowStock.take(3).forEach { m ->
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .padding(vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            "• ${m.nama}",
+                                            Modifier.weight(1f),
+                                            style = MaterialTheme.typography.bodySmall,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            "sisa ${m.stok}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = DANGER
+                                        )
                                     }
                                 }
                             }
@@ -464,12 +517,26 @@ fun HomeScreen(
                     Column(
                         Modifier.fillMaxWidth()
                             .widthIn(max = 900.dp)
-                            .padding(horizontal = Sp.xl, vertical = Sp.lg)
+                            .padding(
+                                horizontal = Sp.screenX,
+                                vertical = Sp.lg
+                            )
                     ) {
-                        Text("Menu Cepat",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.height(Sp.md))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    "Menu Cepat",
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    "Akses fitur yang sering dipakai",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(Sp.lg))
 
                         val cols = if (isTablet) 6 else 4
                         LazyVerticalGrid(
@@ -482,7 +549,7 @@ fun HomeScreen(
                             userScrollEnabled = false
                         ) {
                             items(shortcuts, key = { it.route }) { sc ->
-                                ShortcutItemNew(sc) {
+                                ShortcutTile(sc) {
                                     if (sc.route.startsWith("tab_")) {
                                         innerNav.navigate(sc.route) {
                                             popUpTo(innerNav.graph.startDestinationId) {
@@ -503,57 +570,85 @@ fun HomeScreen(
                 // ═══ TOP MENU ═══
                 if (topMenu.isNotEmpty()) {
                     item {
-                        Column(
+                        Box(
                             Modifier.fillMaxWidth()
                                 .widthIn(max = 900.dp)
+                                .padding(
+                                    horizontal = Sp.screenX,
+                                    vertical = Sp.sm
+                                )
                         ) {
-                            Card(
-                                Modifier.fillMaxWidth().padding(16.dp, 0.dp),
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Column(Modifier.padding(16.dp)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                            AppCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        Modifier.size(36.dp).clip(CircleShape)
+                                            .background(Color(0xFFFFD54F).copy(alpha = 0.2f)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
                                         Text("🏆", style = MaterialTheme.typography.titleMedium)
-                                        Spacer(Modifier.width(6.dp))
-                                        Text("Top Menu Hari Ini",
-                                            style = MaterialTheme.typography.titleMedium,
-                                            fontWeight = FontWeight.Bold)
                                     }
-                                    Spacer(Modifier.height(12.dp))
-                                    topMenu.forEachIndexed { idx, m ->
-                                        Row(
-                                            Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically
+                                    Spacer(Modifier.width(Sp.sm))
+                                    Column(Modifier.weight(1f)) {
+                                        Text(
+                                            "Top Menu Hari Ini",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                        Text(
+                                            "Menu paling laris",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.height(Sp.md))
+                                topMenu.forEachIndexed { idx, m ->
+                                    Row(
+                                        Modifier.fillMaxWidth()
+                                            .padding(vertical = 6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Surface(
+                                            color = when (idx) {
+                                                0 -> Color(0xFFFFD54F)
+                                                1 -> Color(0xFFCFD8DC)
+                                                else -> Color(0xFFFFAB91)
+                                            },
+                                            shape = RoundedCornerShape(Rd.xs)
                                         ) {
-                                            Surface(
-                                                color = when (idx) {
-                                                    0 -> Color(0xFFFFD54F)
-                                                    1 -> Color(0xFFCFD8DC)
-                                                    else -> Color(0xFFFFAB91)
-                                                },
-                                                shape = RoundedCornerShape(6.dp)
+                                            Box(
+                                                Modifier.size(28.dp),
+                                                contentAlignment = Alignment.Center
                                             ) {
-                                                Box(Modifier.size(26.dp),
-                                                    contentAlignment = Alignment.Center) {
-                                                    Text("${idx + 1}",
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFF424242),
-                                                        style = MaterialTheme.typography.labelMedium)
-                                                }
+                                                Text(
+                                                    "${idx + 1}",
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF424242),
+                                                    style = MaterialTheme.typography.labelMedium
+                                                )
                                             }
-                                            Spacer(Modifier.width(10.dp))
-                                            Column(Modifier.weight(1f)) {
-                                                Text(m.namaMenu,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    style = MaterialTheme.typography.bodyMedium)
-                                                Text("${m.totalQty}x terjual",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                            Text(m.totalOmzet.rupiah(),
-                                                fontWeight = FontWeight.Bold, color = BRAND,
-                                                style = MaterialTheme.typography.bodyMedium)
                                         }
+                                        Spacer(Modifier.width(Sp.md))
+                                        Column(Modifier.weight(1f)) {
+                                            Text(
+                                                m.namaMenu,
+                                                fontWeight = FontWeight.SemiBold,
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                "${m.totalQty}x terjual",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                        Text(
+                                            m.totalOmzet.rupiah(),
+                                            fontWeight = FontWeight.Bold,
+                                            color = BRAND,
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
                                     }
                                 }
                             }
@@ -561,41 +656,55 @@ fun HomeScreen(
                     }
                 }
 
-                item { Spacer(Modifier.height(20.dp)) }
+                item { Spacer(Modifier.height(Sp.xl)) }
             }
 
-            // ═══ TOMBOL STICKY ═══
-            Surface(
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth(),
-                shadowElevation = 12.dp,
-                color = Color.Transparent
-            ) {
-                Box(
-                    Modifier.fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    Color.Transparent,
-                                    MaterialTheme.colorScheme.surface
-                                )
+            // ═══ TOMBOL STICKY "MULAI TRANSAKSI" ═══
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                MaterialTheme.colorScheme.background
                             )
                         )
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
+                    )
+                    .padding(Sp.lg),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .widthIn(max = 900.dp)
                 ) {
+                    var pressed by remember { mutableStateOf(false) }
+                    val scale by animateFloatAsState(
+                        targetValue = if (pressed) 0.97f else 1f,
+                        animationSpec = tween(120),
+                        label = "startScale"
+                    )
                     Box(
                         Modifier
                             .fillMaxWidth()
-                            .widthIn(max = 900.dp)
                             .height(60.dp)
-                            .shadow(12.dp, RoundedCornerShape(18.dp))
+                            .scale(scale)
+                            .shadow(
+                                elevation = 12.dp,
+                                shape = RoundedCornerShape(Rd.lg),
+                                ambientColor = BRAND,
+                                spotColor = BRAND
+                            )
                             .background(
                                 Brush.horizontalGradient(
                                     colors = listOf(BRAND, BRAND_DARK)
                                 ),
-                                shape = RoundedCornerShape(18.dp)
+                                shape = RoundedCornerShape(Rd.lg)
                             )
                             .clickable {
+                                pressed = !pressed
                                 innerNav.navigate(Routes.TAB_POS) {
                                     popUpTo(innerNav.graph.startDestinationId) {
                                         saveState = true
@@ -606,13 +715,18 @@ fun HomeScreen(
                         contentAlignment = Alignment.Center
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.ShoppingCart, null,
-                                Modifier.size(24.dp), tint = Color.White)
-                            Spacer(Modifier.width(12.dp))
-                            Text("MULAI TRANSAKSI",
+                            Icon(
+                                Icons.Default.ShoppingCart, null,
+                                Modifier.size(24.dp),
+                                tint = Color.White
+                            )
+                            Spacer(Modifier.width(Sp.md))
+                            Text(
+                                "MULAI TRANSAKSI",
                                 fontWeight = FontWeight.Black,
                                 color = Color.White,
-                                style = MaterialTheme.typography.titleLarge)
+                                style = MaterialTheme.typography.titleLarge
+                            )
                         }
                     }
                 }
@@ -621,94 +735,98 @@ fun HomeScreen(
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// HOME STAT — glassmorphism card
+// ═══════════════════════════════════════════════════════════
 @Composable
-private fun HomeStat(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(label,
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White.copy(alpha = 0.85f))
-        Text(value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            color = Color.White,
-            maxLines = 1)
-    }
-}
-
-@Composable
-private fun HomeStatBig(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(modifier) {
-        Text(label,
-            style = MaterialTheme.typography.labelMedium,
-            color = Color.White.copy(alpha = 0.75f))
-        Spacer(Modifier.height(2.dp))
-        Text(value,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Black,
-            color = Color.White,
-            maxLines = 1)
-    }
-}
-
-@Composable
-private fun ShortcutItem(sc: HomeShortcut, onClick: () -> Unit) {
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 6.dp, horizontal = 2.dp)
+private fun HomeStatGlass(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier
+            .clip(RoundedCornerShape(Rd.md))
+            .background(Color.White.copy(alpha = 0.15f))
+            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(Rd.md))
+            .padding(Sp.md)
     ) {
-        Box(
-            Modifier.size(52.dp).clip(RoundedCornerShape(14.dp))
-                .background(sc.color.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(sc.icon, null, tint = sc.color, modifier = Modifier.size(26.dp))
+        Column {
+            Text(
+                label,
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White.copy(alpha = 0.8f)
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Black,
+                color = Color.White,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(sc.label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 2,
-            textAlign = TextAlign.Center)
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// SHORTCUT TILE — dengan feedback animation
+// ═══════════════════════════════════════════════════════════
 @Composable
-private fun ShortcutItemNew(sc: HomeShortcut, onClick: () -> Unit) {
+private fun ShortcutTile(sc: HomeShortcut, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     val scale by animateFloatAsState(
         targetValue = if (pressed) 0.94f else 1f,
         animationSpec = tween(120),
-        label = "scale"
+        label = "tileScale"
     )
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .scale(scale)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = Sp.sm, horizontal = 2.dp)
+            .clip(RoundedCornerShape(Rd.md))
+            .clickable {
+                pressed = !pressed
+                onClick()
+            }
+            .padding(vertical = Sp.sm, horizontal = 4.dp)
     ) {
         Box(
-            Modifier.size(60.dp).clip(RoundedCornerShape(18.dp))
-                .background(surfaceCard())
-                .border(1.dp, borderColor(), RoundedCornerShape(18.dp)),
+            Modifier
+                .size(56.dp)
+                .clip(RoundedCornerShape(Rd.iconBox))
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            sc.color.copy(alpha = 0.15f),
+                            sc.color.copy(alpha = 0.08f)
+                        )
+                    )
+                )
+                .border(
+                    1.dp,
+                    sc.color.copy(alpha = 0.15f),
+                    RoundedCornerShape(Rd.iconBox)
+                ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(sc.icon, null,
+            Icon(
+                sc.icon, null,
                 tint = sc.color,
-                modifier = Modifier.size(28.dp))
+                modifier = Modifier.size(26.dp)
+            )
         }
         Spacer(Modifier.height(Sp.sm))
-        Text(sc.label,
+        Text(
+            sc.label,
             style = MaterialTheme.typography.labelSmall,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 2,
-            textAlign = TextAlign.Center)
+            textAlign = TextAlign.Center,
+            lineHeight = androidx.compose.ui.unit.TextUnit.Unspecified
+        )
     }
 }
