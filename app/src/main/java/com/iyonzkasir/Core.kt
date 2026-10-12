@@ -1,7 +1,10 @@
 package com.iyonzkasir
 
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -9,6 +12,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -62,11 +69,11 @@ val WARNING = Color(0xFFF57C00)
 val DANGER = Color(0xFFD32F2F)
 
 // ═══════ DARK MODE SURFACES ═══════
-val BG_DARK = Color(0xFF0F0F0F)        // background utama
-val SURFACE_DARK = Color(0xFF1A1A1A)   // card background
-val SURFACE_DARK_2 = Color(0xFF232323) // card elevated
-val BORDER_DARK = Color(0xFF2E2E2E)    // border halus
-val TEXT_MUTED = Color(0xFF8A8A8A)     // text sekunder
+val BG_DARK = Color(0xFF0F0F0F)
+val SURFACE_DARK = Color(0xFF1A1A1A)
+val SURFACE_DARK_2 = Color(0xFF232323)
+val BORDER_DARK = Color(0xFF2E2E2E)
+val TEXT_MUTED = Color(0xFF8A8A8A)
 
 // ═══════ EXTENSIONS ═══════
 fun Int.rupiah(): String =
@@ -433,7 +440,78 @@ fun String.toColorSafe(fallback: Color = BRAND): Color {
     }
 }
 
-// ═══════ TEMA COMPOSABLE ═══════
+// ═══════════════════════════════════════════════════════════
+// TYPOGRAPHY — mudah dibaca semua kalangan
+// ═══════════════════════════════════════════════════════════
+private val IyonzTypography = Typography(
+    displayLarge = TextStyle(
+        fontSize = 52.sp, lineHeight = 60.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = (-1).sp
+    ),
+    displayMedium = TextStyle(
+        fontSize = 42.sp, lineHeight = 50.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.5).sp
+    ),
+    displaySmall = TextStyle(
+        fontSize = 34.sp, lineHeight = 42.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.25).sp
+    ),
+    headlineLarge = TextStyle(
+        fontSize = 30.sp, lineHeight = 38.sp, fontWeight = FontWeight.Bold,
+        letterSpacing = (-0.25).sp
+    ),
+    headlineMedium = TextStyle(
+        fontSize = 26.sp, lineHeight = 34.sp, fontWeight = FontWeight.Bold
+    ),
+    headlineSmall = TextStyle(
+        fontSize = 22.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold
+    ),
+    titleLarge = TextStyle(
+        fontSize = 20.sp, lineHeight = 28.sp, fontWeight = FontWeight.SemiBold
+    ),
+    titleMedium = TextStyle(
+        fontSize = 17.sp, lineHeight = 24.sp, fontWeight = FontWeight.SemiBold
+    ),
+    titleSmall = TextStyle(
+        fontSize = 15.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold
+    ),
+    bodyLarge = TextStyle(
+        fontSize = 16.sp, lineHeight = 24.sp, fontWeight = FontWeight.Normal
+    ),
+    bodyMedium = TextStyle(
+        fontSize = 14.sp, lineHeight = 21.sp, fontWeight = FontWeight.Normal
+    ),
+    bodySmall = TextStyle(
+        fontSize = 12.5.sp, lineHeight = 18.sp, fontWeight = FontWeight.Normal
+    ),
+    labelLarge = TextStyle(
+        fontSize = 14.sp, lineHeight = 20.sp, fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.1.sp
+    ),
+    labelMedium = TextStyle(
+        fontSize = 12.sp, lineHeight = 16.sp, fontWeight = FontWeight.SemiBold,
+        letterSpacing = 0.3.sp
+    ),
+    labelSmall = TextStyle(
+        fontSize = 11.sp, lineHeight = 15.sp, fontWeight = FontWeight.Medium,
+        letterSpacing = 0.4.sp
+    )
+)
+
+// ═══════════════════════════════════════════════════════════
+// SHAPES — lebih rounded & friendly
+// ═══════════════════════════════════════════════════════════
+private val IyonzShapes = Shapes(
+    extraSmall = RoundedCornerShape(6.dp),
+    small = RoundedCornerShape(10.dp),
+    medium = RoundedCornerShape(14.dp),
+    large = RoundedCornerShape(20.dp),
+    extraLarge = RoundedCornerShape(28.dp)
+)
+
+// ═══════════════════════════════════════════════════════════
+// TEMA COMPOSABLE
+// ═══════════════════════════════════════════════════════════
 @Composable
 fun IyonzTheme(
     darkTheme: Boolean = when (ThemeManager.mode) {
@@ -452,19 +530,73 @@ fun IyonzTheme(
         darkColorScheme(
             primary = primary,
             onPrimary = Color.White,
+            primaryContainer = primary.copy(alpha = 0.18f),
+            onPrimaryContainer = primaryLight,
+
             secondary = primaryDark,
-            surfaceVariant = SURFACE_DARK_2,
+            onSecondary = Color.White,
+            secondaryContainer = primaryDark.copy(alpha = 0.2f),
+            onSecondaryContainer = Color.White,
+
             background = BG_DARK,
+            onBackground = Color(0xFFF2F2F2),
             surface = SURFACE_DARK,
+            onSurface = Color(0xFFF2F2F2),
+            surfaceVariant = SURFACE_DARK_2,
+            onSurfaceVariant = Color(0xFFB8B8B8),
+            surfaceContainer = Color(0xFF1E1E1E),
+            surfaceContainerHigh = Color(0xFF262626),
+            surfaceContainerHighest = Color(0xFF2E2E2E),
+            surfaceContainerLow = Color(0xFF161616),
+            surfaceContainerLowest = Color(0xFF0A0A0A),
+
             outline = BORDER_DARK,
-            onSurfaceVariant = TEXT_MUTED
+            outlineVariant = Color(0xFF242424),
+            scrim = Color(0xCC000000),
+
+            error = Color(0xFFF87171),
+            onError = Color(0xFF2A0A0A),
+            errorContainer = Color(0xFF3D1414),
+            onErrorContainer = Color(0xFFFFC7C7)
         )
     } else {
         lightColorScheme(
-            primary = primary, onPrimary = Color.White,
+            primary = primary,
+            onPrimary = Color.White,
+            primaryContainer = primaryLight,
+            onPrimaryContainer = primaryDark,
+
             secondary = primaryDark,
-            surfaceVariant = Color(0xFFF5F5F5)
+            onSecondary = Color.White,
+            secondaryContainer = primaryLight,
+            onSecondaryContainer = primaryDark,
+
+            background = Color(0xFFFAF9F6),
+            onBackground = Color(0xFF1A1A1A),
+            surface = Color(0xFFFFFFFF),
+            onSurface = Color(0xFF1A1A1A),
+            surfaceVariant = Color(0xFFF2F0EB),
+            onSurfaceVariant = Color(0xFF5A5A5A),
+            surfaceContainer = Color(0xFFF7F5F0),
+            surfaceContainerHigh = Color(0xFFF2EFE9),
+            surfaceContainerHighest = Color(0xFFEDEAE3),
+            surfaceContainerLow = Color(0xFFFCFBF8),
+            surfaceContainerLowest = Color(0xFFFFFFFF),
+
+            outline = Color(0xFFDDD8CE),
+            outlineVariant = Color(0xFFEBE7DE),
+            scrim = Color(0x99000000),
+
+            error = Color(0xFFDC2626),
+            onError = Color.White,
+            errorContainer = Color(0xFFFEE2E2),
+            onErrorContainer = Color(0xFF7F1D1D)
         )
     }
-    MaterialTheme(colorScheme = colors, content = content)
+    MaterialTheme(
+        colorScheme = colors,
+        typography = IyonzTypography,
+        shapes = IyonzShapes,
+        content = content
+    )
 }
