@@ -227,8 +227,8 @@ fun AppCard(
         .background(color, shape)
 
     Column(
-        if (onClick != null) baseMod.clickable(onClick = onClick) else baseMod,
-        modifier = Modifier.padding(Sp.cardInner),
+        modifier = (if (onClick != null) baseMod.clickable(onClick = onClick) else baseMod)
+            .padding(Sp.cardInner),
         content = content
     )
 }
