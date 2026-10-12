@@ -1,6 +1,9 @@
 package com.iyonzkasir.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -12,6 +15,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -19,10 +25,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.iyonzkasir.*
 import com.iyonzkasir.data.*
-import kotlinx.coroutines.delay
 
 // ═══════════════════════════════════════════════════════════
-// SUCCESS SCREEN — Full Page (setelah bayar)
+// SUCCESS SCREEN — muncul setelah transaksi selesai
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,13 +42,6 @@ fun SuccessScreen(
     val printerEnabled = FeatureManager.isEnabled(FeatureKey.PRINTER_BT)
     val waEnabled = FeatureManager.isEnabled(FeatureKey.WHATSAPP_INTENT)
 
-    // Auto play sound saat muncul
-    LaunchedEffect(Unit) {
-        if (FeatureManager.isEnabled(FeatureKey.AUDIT_LOG)) {
-            // placeholder — suara di-handle dari BayarRoute
-        }
-    }
-
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background
     ) { pad ->
@@ -51,128 +49,185 @@ fun SuccessScreen(
             Modifier
                 .padding(pad)
                 .fillMaxSize()
-                .padding(20.dp),
+                .padding(horizontal = Sp.xl, vertical = Sp.lg),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(Sp.xl))
 
-            // ═══ Big check icon ═══
+            // ═══ SUCCESS ICON — dengan glow effect ═══
             Box(
                 Modifier
-                    .size(120.dp)
+                    .size(140.dp)
                     .clip(CircleShape)
-                    .background(SUCCESS.copy(alpha = 0.12f)),
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                SUCCESS.copy(alpha = 0.18f),
+                                SUCCESS.copy(alpha = 0.04f)
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    Icons.Default.CheckCircle,
-                    null,
-                    tint = SUCCESS,
-                    modifier = Modifier.size(80.dp)
-                )
+                Box(
+                    Modifier
+                        .size(96.dp)
+                        .clip(CircleShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(SUCCESS, Color(0xFF3DD166))
+                            )
+                        )
+                        .shadow(
+                            elevation = 16.dp,
+                            shape = CircleShape,
+                            ambientColor = SUCCESS,
+                            spotColor = SUCCESS
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.Check, null,
+                        tint = Color.White,
+                        modifier = Modifier.size(56.dp)
+                    )
+                }
             }
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(Sp.xl))
 
-            // ═══ Title ═══
+            // ═══ TITLE ═══
             Text(
                 "Transaksi Berhasil!",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
                 color = MaterialTheme.colorScheme.onBackground
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(Sp.xs))
             Text(
-                "Data telah disimpan ke sistem",
+                "Data telah tersimpan ke sistem",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(Sp.xxl))
 
-            // ═══ Summary Card ═══
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(
-                    Modifier.padding(20.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+            // ═══ SUMMARY CARD ═══
+            AppCard {
+                // Order ID + Antrian
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "No. Order",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        "#${order.id}",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                if (order.nomorAntrian > 0) {
+                    Spacer(Modifier.height(Sp.sm))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.ConfirmationNumber, null,
+                            tint = BRAND,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "No. Antrian",
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Text(
+                            "#${order.nomorAntrian}",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = BRAND
+                        )
+                    }
+                }
+
+                AppDivider(Modifier.padding(vertical = Sp.md))
+
+                // Total + Dibayar
+                Row {
+                    Text(
+                        "Total Harga",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        order.total.rupiah(),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.height(Sp.xs))
+                Row {
+                    Text(
+                        "Dibayar",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        order.dibayar.rupiah(),
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Spacer(Modifier.height(Sp.md))
+
+                // ═══ KEMBALIAN — HIGHLIGHT ═══
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(Rd.md))
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    Color(0xFF1976D2),
+                                    Color(0xFF1565C0)
+                                )
+                            )
+                        )
+                        .padding(Sp.lg)
                 ) {
-                    // Order ID
-                    Row {
-                        Text("No. Order",
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("#${order.id}",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold)
-                    }
-
-                    // Antrian kalau ada
-                    if (order.nomorAntrian > 0) {
-                        Row {
-                            Text("No. Antrian",
-                                Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("#${order.nomorAntrian}",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = BRAND)
-                        }
-                    }
-
-                    HorizontalDivider(thickness = 0.5.dp)
-
-                    // Total
-                    Row {
-                        Text("Total Harga",
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(order.total.rupiah(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold)
-                    }
-
-                    // Dibayar
-                    Row {
-                        Text("Dibayar",
-                            Modifier.weight(1f),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(order.dibayar.rupiah(),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold)
-                    }
-
-                    HorizontalDivider(thickness = 0.5.dp)
-
-                    // ═══ Kembalian di-highlight ═══
-                    Surface(
-                        color = Color(0xFFE3F2FD),
-                        shape = RoundedCornerShape(10.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(44.dp).clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Text("Kembalian",
-                                Modifier.weight(1f),
-                                style = MaterialTheme.typography.bodyLarge,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF1976D2))
-                            Text(order.kembalian.rupiah(),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF1565C0))
+                            Icon(
+                                Icons.Default.Payments, null,
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(Sp.md))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                "Kembalian",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color.White.copy(alpha = 0.9f)
+                            )
+                            Text(
+                                order.kembalian.rupiah(),
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Black,
+                                color = Color.White
+                            )
                         }
                     }
                 }
@@ -180,34 +235,34 @@ fun SuccessScreen(
 
             Spacer(Modifier.weight(1f))
 
-            // ═══ 4 Action Buttons ═══
+            // ═══ ACTION BUTTONS ROW ═══
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                ActionButton(
+                ActionButtonNew(
                     icon = Icons.Default.Check,
                     label = "Selesai",
                     color = SUCCESS,
                     onClick = onDone
                 )
                 if (printerEnabled) {
-                    ActionButton(
+                    ActionButtonNew(
                         icon = Icons.Default.Print,
-                        label = "Struk",
+                        label = "Cetak",
                         color = BRAND,
                         onClick = onPrint
                     )
                 }
-                ActionButton(
+                ActionButtonNew(
                     icon = Icons.Default.Receipt,
                     label = "Preview",
                     color = Color(0xFF43A047),
                     onClick = onPreview
                 )
                 if (waEnabled) {
-                    ActionButton(
+                    ActionButtonNew(
                         icon = Icons.Default.Share,
                         label = "Bagikan",
                         color = Color(0xFF1E88E5),
@@ -216,60 +271,83 @@ fun SuccessScreen(
                 }
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(Sp.lg))
 
-            // ═══ Big "Buat Transaksi Baru" button ═══
-            Button(
+            // ═══ BIG CTA — BUAT TRANSAKSI BARU ═══
+            AppButton(
+                text = "Buat Transaksi Baru",
                 onClick = onNewTransaction,
-                modifier = Modifier.fillMaxWidth().height(56.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFFFFB300)
-                ),
-                shape = RoundedCornerShape(14.dp)
-            ) {
-                Icon(Icons.Default.Add, null, Modifier.size(22.dp))
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    "BUAT TRANSAKSI BARU",
-                    fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.titleMedium,
-                    color = Color.White
-                )
-            }
+                variant = AppBtnVariant.PRIMARY,
+                size = AppBtnSize.LARGE,
+                icon = Icons.Default.Add,
+                fullWidth = true
+            )
 
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(Sp.sm))
         }
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+// ACTION BUTTON — icon circle + label
+// ═══════════════════════════════════════════════════════════
 @Composable
-private fun ActionButton(
+private fun ActionButtonNew(
     icon: ImageVector,
     label: String,
     color: Color,
     onClick: () -> Unit
 ) {
+    var pressed by remember { mutableStateOf(false) }
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.9f else 1f,
+        animationSpec = tween(100),
+        label = "actionScale"
+    )
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 8.dp)
+            .scale(scale)
+            .clip(RoundedCornerShape(Rd.md))
+            .clickable {
+                pressed = !pressed
+                onClick()
+            }
+            .padding(horizontal = Sp.sm, vertical = Sp.sm)
     ) {
         Box(
             Modifier
-                .size(52.dp)
+                .size(56.dp)
                 .clip(CircleShape)
-                .background(color.copy(alpha = 0.15f)),
+                .background(
+                    Brush.linearGradient(
+                        colors = listOf(
+                            color.copy(alpha = 0.18f),
+                            color.copy(alpha = 0.1f)
+                        )
+                    )
+                )
+                .border(
+                    1.dp,
+                    color.copy(alpha = 0.2f),
+                    CircleShape
+                ),
             contentAlignment = Alignment.Center
         ) {
-            Icon(icon, null, tint = color, modifier = Modifier.size(26.dp))
+            Icon(
+                icon, null,
+                tint = color,
+                modifier = Modifier.size(26.dp)
+            )
         }
-        Spacer(Modifier.height(6.dp))
-        Text(label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.Medium,
+        Spacer(Modifier.height(Sp.xs))
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
             color = color,
-            textAlign = TextAlign.Center)
+            textAlign = TextAlign.Center
+        )
     }
 }
