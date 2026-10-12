@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -11,9 +12,11 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -22,6 +25,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -29,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavHostController
 import coil.compose.AsyncImage
@@ -178,7 +183,6 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                 onClick = { nav.navigate(Routes.FEATURE_TOGGLE) }
             ))
         }
-        // ── SYNC WEB MENU (BARU) ──
         if (Session.can(PermissionKey.KELOLA_FITUR)) {
             trx.add(SettingItem(
                 key = "sync_web",
@@ -309,79 +313,134 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
     ) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(bottom = 24.dp)
+            contentPadding = PaddingValues(bottom = Sp.xxl)
         ) {
+            // ═══ STORE HEADER CARD ═══
             item {
-                Card(
-                    Modifier.fillMaxWidth().padding(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)
-                ) {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier.size(56.dp).clip(CircleShape).background(BRAND),
-                            contentAlignment = Alignment.Center
-                        ) { Icon(Icons.Default.Storefront, null, tint = Color.White) }
-                        Spacer(Modifier.width(12.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text(namaToko.ifBlank { "Toko Saya" },
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold)
-                            Text("${businessType.emoji} ${businessType.label}",
-                                style = MaterialTheme.typography.bodySmall)
-                        }
-                        if (Session.can(PermissionKey.PROFIL_TOKO)) {
-                            IconButton(onClick = { nav.navigate(Routes.PROFIL_TOKO) }) {
-                                Icon(Icons.Default.Edit, null, tint = BRAND)
-                            }
-                        }
-                    }
-                }
-            }
-
-            user?.let { u ->
-                item {
-                    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
-                        Row(Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.padding(Sp.lg)) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .clip(Rd.cardLg)
+                            .background(
+                                Brush.linearGradient(
+                                    colors = listOf(BRAND, BRAND_DARK)
+                                )
+                            )
+                            .padding(Sp.lg)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
-                                Modifier.size(44.dp).clip(CircleShape).background(BRAND_LIGHT),
+                                Modifier.size(56.dp).clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.2f))
+                                    .border(
+                                        1.5.dp,
+                                        Color.White.copy(alpha = 0.3f),
+                                        CircleShape
+                                    ),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (u.fotoUri != null) {
-                                    AsyncImage(model = u.fotoUri, contentDescription = null,
-                                        contentScale = ContentScale.Crop,
-                                        modifier = Modifier.fillMaxSize())
-                                } else {
-                                    Text(u.nama.take(1).uppercase(),
-                                        color = BRAND, fontWeight = FontWeight.Bold)
-                                }
+                                Icon(
+                                    Icons.Default.Storefront, null,
+                                    tint = Color.White, modifier = Modifier.size(28.dp)
+                                )
                             }
-                            Spacer(Modifier.width(12.dp))
+                            Spacer(Modifier.width(Sp.md))
                             Column(Modifier.weight(1f)) {
-                                Text(u.nama, fontWeight = FontWeight.SemiBold)
-                                Text(UserRole.fromId(u.role).label,
+                                Text(
+                                    namaToko.ifBlank { "Toko Saya" },
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    "${businessType.emoji} ${businessType.label}",
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    color = Color.White.copy(alpha = 0.85f)
+                                )
                             }
-                            TextButton(onClick = {
-                                scope.launch {
-                                    app.userRepo.log(u.id, u.nama, "LOGOUT")
-                                    Session.logout()
-                                    nav.navigate(Routes.LOGIN) {
-                                        popUpTo(0) { inclusive = true }
-                                    }
+                            if (Session.can(PermissionKey.PROFIL_TOKO)) {
+                                IconButton(
+                                    onClick = { nav.navigate(Routes.PROFIL_TOKO) }
+                                ) {
+                                    Icon(
+                                        Icons.Default.Edit, null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(20.dp)
+                                    )
                                 }
-                            }) { Text("Keluar", color = DANGER) }
+                            }
                         }
                     }
                 }
             }
 
+            // ═══ USER CARD ═══
+            user?.let { u ->
+                item {
+                    Box(Modifier.padding(horizontal = Sp.lg)) {
+                        AppCard {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    Modifier.size(48.dp).clip(CircleShape)
+                                        .background(BRAND.copy(alpha = 0.12f))
+                                        .border(1.dp, BRAND.copy(alpha = 0.2f), CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    if (u.fotoUri != null) {
+                                        AsyncImage(
+                                            model = u.fotoUri,
+                                            contentDescription = null,
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(
+                                            u.nama.take(1).uppercase(),
+                                            color = BRAND,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                }
+                                Spacer(Modifier.width(Sp.md))
+                                Column(Modifier.weight(1f)) {
+                                    Text(u.nama,
+                                        fontWeight = FontWeight.SemiBold,
+                                        style = MaterialTheme.typography.titleSmall)
+                                    Text(
+                                        UserRole.fromId(u.role).label,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        app.userRepo.log(u.id, u.nama, "LOGOUT")
+                                        Session.logout()
+                                        nav.navigate(Routes.LOGIN) {
+                                            popUpTo(0) { inclusive = true }
+                                        }
+                                    }
+                                }) {
+                                    Icon(Icons.Default.Logout, null,
+                                        tint = DANGER, modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Keluar", color = DANGER,
+                                        fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ═══ SEARCH ═══
             item {
                 OutlinedTextField(
                     value = searchQuery, onValueChange = { searchQuery = it },
-                    placeholder = { Text("Cari pengaturan...",
+                    placeholder = { Text("Cari pengaturan…",
                         style = MaterialTheme.typography.bodySmall) },
                     leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                     trailingIcon = {
@@ -394,36 +453,44 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
                     },
                     singleLine = true,
                     textStyle = MaterialTheme.typography.bodyMedium,
+                    shape = Rd.button,
                     modifier = Modifier.fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp).height(52.dp)
+                        .padding(horizontal = Sp.lg, vertical = Sp.md)
+                        .height(52.dp)
                 )
             }
 
+            // ═══ LIST ═══
             if (filteredGroups.isEmpty()) {
                 item {
-                    Box(Modifier.fillMaxWidth().padding(48.dp),
+                    Box(Modifier.fillMaxWidth().padding(Sp.huge),
                         contentAlignment = Alignment.Center) {
-                        Text("Nggak ada yang cocok",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Default.SearchOff, null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(40.dp))
+                            Spacer(Modifier.height(Sp.sm))
+                            Text("Nggak ada yang cocok",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
                     }
                 }
             } else {
                 filteredGroups.forEach { (title, items) ->
                     item {
-                        Text(title,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold, color = BRAND,
-                            modifier = Modifier.padding(
-                                start = 20.dp, top = 16.dp, bottom = 6.dp
-                            ))
+                        SectionHeader(title = title)
                     }
-                    items(items, key = { it.key }) { SettingRow(it) }
+                    items(items, key = { it.key }) { item ->
+                        Box(Modifier.padding(horizontal = Sp.lg)) {
+                            SettingRowNew(item)
+                        }
+                    }
                 }
             }
 
             item {
-                Box(Modifier.fillMaxWidth().padding(24.dp),
+                Box(Modifier.fillMaxWidth().padding(Sp.xxl),
                     contentAlignment = Alignment.Center) {
                     Text("iyonzkasir v0.8.0 • Made with ❤️",
                         style = MaterialTheme.typography.bodySmall,
@@ -435,35 +502,40 @@ fun SettingsRoute(app: IyonzApp, nav: NavHostController) {
 }
 
 @Composable
-private fun SettingRow(item: SettingItem) {
-    Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = item.onClick),
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                    .background(item.color.copy(alpha = 0.15f)),
-                contentAlignment = Alignment.Center
-            ) { Icon(item.icon, null, Modifier.size(22.dp), item.color) }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(item.title, fontWeight = FontWeight.Medium)
-                if (item.subtitle.isNotBlank()) {
-                    Text(item.subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 2)
+private fun SettingRowNew(item: SettingItem) {
+    Box(Modifier.padding(bottom = Sp.sm)) {
+        AppCard(onClick = item.onClick) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(44.dp).clip(RoundedCornerShape(Rd.sm))
+                        .background(item.color.copy(alpha = 0.12f))
+                        .border(
+                            1.dp,
+                            item.color.copy(alpha = 0.15f),
+                            RoundedCornerShape(Rd.sm)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(item.icon, null, Modifier.size(22.dp), item.color)
                 }
+                Spacer(Modifier.width(Sp.md))
+                Column(Modifier.weight(1f)) {
+                    Text(item.title, fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall)
+                    if (item.subtitle.isNotBlank()) {
+                        Text(item.subtitle,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Icon(Icons.Default.ChevronRight, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp))
             }
-            Icon(Icons.Default.ChevronRight, null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
-    HorizontalDivider(Modifier.padding(start = 70.dp), thickness = 0.5.dp)
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -487,84 +559,104 @@ fun TemaWarnaRoute(app: IyonzApp, nav: NavHostController) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BRAND, titleContentColor = Color.White
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
                 )
             )
         }
     ) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(Sp.lg),
+            verticalArrangement = Arrangement.spacedBy(Sp.md)
         ) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("Warna Aktif",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Spacer(Modifier.height(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                Modifier.size(40.dp).clip(CircleShape)
-                                    .background(BrandColors.primary)
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text(BrandColors.theme.label,
-                                fontWeight = FontWeight.Bold,
-                                style = MaterialTheme.typography.titleMedium)
-                        }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Pilih warna di bawah — semua tombol, header, & aksen berubah otomatis",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                AppCard(
+                    color = BRAND.copy(alpha = 0.08f),
+                    outlined = true
+                ) {
+                    Text("Warna Aktif",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(Sp.sm))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(48.dp).clip(CircleShape)
+                                .background(BrandColors.primary)
+                                .border(2.dp, Color.White, CircleShape)
+                        )
+                        Spacer(Modifier.width(Sp.md))
+                        Text(
+                            BrandColors.theme.label,
+                            fontWeight = FontWeight.Bold,
+                            style = MaterialTheme.typography.titleMedium
+                        )
                     }
+                    Spacer(Modifier.height(Sp.sm))
+                    Text(
+                        "Pilih warna di bawah — semua tombol, header, & aksen berubah otomatis",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
 
             items(AppTheme.values().toList()) { theme ->
                 val isSelected = selected == theme
-                Card(
-                    Modifier.fillMaxWidth().clickable {
+                AppCard(
+                    onClick = {
                         selected = theme
                         ThemeManager.updateAppTheme(theme)
                         scope.launch { app.settingRepo.setAppTheme(theme) }
                     },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) Color(theme.lightHex)
-                        else MaterialTheme.colorScheme.surface
-                    ),
-                    border = if (isSelected)
-                        androidx.compose.foundation.BorderStroke(2.dp, Color(theme.primaryHex))
-                    else null
+                    outlined = !isSelected,
+                    color = if (isSelected) Color(theme.lightHex)
+                    else MaterialTheme.colorScheme.surface
                 ) {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.width(72.dp).height(40.dp)) {
-                            Box(Modifier.size(32.dp).clip(CircleShape)
-                                .background(Color(theme.lightHex))
-                                .align(Alignment.BottomStart))
-                            Box(Modifier.size(36.dp).clip(CircleShape)
-                                .background(Color(theme.primaryHex))
-                                .align(Alignment.Center))
-                            Box(Modifier.size(28.dp).clip(CircleShape)
-                                .background(Color(theme.darkHex))
-                                .align(Alignment.TopEnd))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(Modifier.width(80.dp).height(44.dp)) {
+                            Box(
+                                Modifier.size(34.dp).clip(CircleShape)
+                                    .background(Color(theme.lightHex))
+                                    .align(Alignment.BottomStart)
+                            )
+                            Box(
+                                Modifier.size(38.dp).clip(CircleShape)
+                                    .background(Color(theme.primaryHex))
+                                    .align(Alignment.Center)
+                                    .border(2.dp, Color.White, CircleShape)
+                            )
+                            Box(
+                                Modifier.size(30.dp).clip(CircleShape)
+                                    .background(Color(theme.darkHex))
+                                    .align(Alignment.TopEnd)
+                            )
                         }
-                        Spacer(Modifier.width(16.dp))
+                        Spacer(Modifier.width(Sp.md))
                         Column(Modifier.weight(1f)) {
-                            Text("${theme.emoji} ${theme.label}",
-                                fontWeight = FontWeight.SemiBold)
-                            Text("Primary color",
+                            Text(
+                                "${theme.emoji} ${theme.label}",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                "Primary color",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        RadioButton(selected = isSelected, onClick = null)
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.CheckCircle, null,
+                                tint = Color(theme.primaryHex),
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
                     }
                 }
             }
 
-            item { Spacer(Modifier.height(24.dp)) }
+            item { Spacer(Modifier.height(Sp.xxl)) }
         }
     }
 }
@@ -606,117 +698,146 @@ fun TemplateStrukRoute(app: IyonzApp, nav: NavHostController) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BRAND, titleContentColor = Color.White
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
                 )
             )
         }
     ) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+            contentPadding = PaddingValues(Sp.lg),
+            verticalArrangement = Arrangement.spacedBy(Sp.sm)
         ) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Receipt, null,
-                                tint = BRAND, modifier = Modifier.size(28.dp))
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Custom Struk", fontWeight = FontWeight.Bold)
-                                Text("Atur field apa saja yang muncul di struk",
-                                    style = MaterialTheme.typography.bodySmall)
-                            }
+                AppCard(
+                    color = BRAND.copy(alpha = 0.08f),
+                    outlined = true
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            Icons.Default.Receipt, tint = BRAND,
+                            size = 48.dp, iconSize = 24.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
+                        Column(Modifier.weight(1f)) {
+                            Text("Custom Struk", fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
+                            Text("Atur field apa saja yang muncul di struk",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
 
             item {
-                Text("Info Toko", fontWeight = FontWeight.Bold,
-                    style = MaterialTheme.typography.labelLarge, color = BRAND)
+                SectionHeader(title = "INFO TOKO")
             }
             item {
-                ToggleRow("Tampilkan Alamat",
-                    "Alamat toko di bagian atas", showAlamat) {
-                    showAlamat = it
+                ToggleRowNew(
+                    "Tampilkan Alamat",
+                    "Alamat toko di bagian atas",
+                    showAlamat
+                ) { showAlamat = it
                     scope.launch { app.settingRepo.setStrukShowAlamat(it) }
                 }
             }
             item {
-                ToggleRow("Tampilkan Telepon",
-                    "Nomor telepon / WA di header", showTelepon) {
-                    showTelepon = it
+                ToggleRowNew(
+                    "Tampilkan Telepon",
+                    "Nomor telepon / WA di header",
+                    showTelepon
+                ) { showTelepon = it
                     scope.launch { app.settingRepo.setStrukShowTelepon(it) }
                 }
             }
 
-            item { Text("Info Pesanan", fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.labelLarge, color = BRAND) }
-
             item {
-                ToggleRow("Tampilkan Nama Kasir",
-                    "Siapa yang melayani transaksi", showKasir) {
-                    showKasir = it
+                SectionHeader(title = "INFO PESANAN")
+            }
+            item {
+                ToggleRowNew(
+                    "Tampilkan Nama Kasir",
+                    "Siapa yang melayani transaksi",
+                    showKasir
+                ) { showKasir = it
                     scope.launch { app.settingRepo.setStrukShowKasir(it) }
                 }
             }
             item {
-                ToggleRow("Tampilkan Nomor Meja",
-                    "Meja untuk Dine-in / F&B", showMeja) {
-                    showMeja = it
+                ToggleRowNew(
+                    "Tampilkan Nomor Meja",
+                    "Meja untuk Dine-in / F&B",
+                    showMeja
+                ) { showMeja = it
                     scope.launch { app.settingRepo.setStrukShowMeja(it) }
                 }
             }
             item {
-                ToggleRow("Tampilkan Nama Pelanggan",
-                    "Nama & member pelanggan", showPelanggan) {
-                    showPelanggan = it
+                ToggleRowNew(
+                    "Tampilkan Nama Pelanggan",
+                    "Nama & member pelanggan",
+                    showPelanggan
+                ) { showPelanggan = it
                     scope.launch { app.settingRepo.setStrukShowPelanggan(it) }
                 }
             }
             item {
-                ToggleRow("Tampilkan Nomor Antrian",
-                    "Nomor antrian pesanan", showAntrian) {
-                    showAntrian = it
+                ToggleRowNew(
+                    "Tampilkan Nomor Antrian",
+                    "Nomor antrian pesanan",
+                    showAntrian
+                ) { showAntrian = it
                     scope.launch { app.settingRepo.setStrukShowAntrian(it) }
                 }
             }
             item {
-                ToggleRow("Tampilkan Catatan Item",
-                    "Catatan per item (pedas, dll)", showCatatan) {
-                    showCatatan = it
+                ToggleRowNew(
+                    "Tampilkan Catatan Item",
+                    "Catatan per item (pedas, dll)",
+                    showCatatan
+                ) { showCatatan = it
                     scope.launch { app.settingRepo.setStrukShowCatatan(it) }
                 }
             }
             item {
-                ToggleRow("Tampilkan Poin Member",
-                    "Poin yang didapat dari order", showPoin) {
-                    showPoin = it
+                ToggleRowNew(
+                    "Tampilkan Poin Member",
+                    "Poin yang didapat dari order",
+                    showPoin
+                ) { showPoin = it
                     scope.launch { app.settingRepo.setStrukShowPoin(it) }
                 }
             }
 
-            item { Spacer(Modifier.height(24.dp)) }
+            item { Spacer(Modifier.height(Sp.xxl)) }
         }
     }
 }
 
 @Composable
-private fun ToggleRow(
+private fun ToggleRowNew(
     title: String, subtitle: String, value: Boolean,
     onChange: (Boolean) -> Unit
 ) {
-    Card {
-        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+    AppCard {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.Medium)
+                Text(title, fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleSmall)
                 Text(subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis)
             }
-            Switch(checked = value, onCheckedChange = onChange)
+            Spacer(Modifier.width(Sp.sm))
+            Switch(
+                checked = value,
+                onCheckedChange = onChange,
+                colors = SwitchDefaults.colors(checkedTrackColor = BRAND)
+            )
         }
     }
 }
@@ -749,54 +870,74 @@ fun AntrianRoute(app: IyonzApp, nav: NavHostController) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BRAND, titleContentColor = Color.White
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
                 )
             )
         }
     ) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(Sp.lg),
+            verticalArrangement = Arrangement.spacedBy(Sp.md)
         ) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.ConfirmationNumber, null,
-                            tint = BRAND, modifier = Modifier.size(32.dp))
-                        Spacer(Modifier.width(12.dp))
+                AppCard(
+                    color = BRAND.copy(alpha = 0.08f),
+                    outlined = true
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            Icons.Default.ConfirmationNumber,
+                            tint = BRAND,
+                            size = 52.dp,
+                            iconSize = 26.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
                         Column(Modifier.weight(1f)) {
                             Text("Nomor Antrian Otomatis",
-                                fontWeight = FontWeight.Bold)
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
                             Text("Auto-generate untuk setiap order",
-                                style = MaterialTheme.typography.bodySmall)
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(checked = enabled, onCheckedChange = {
-                            enabled = it
-                            scope.launch { app.settingRepo.setAntrianEnabled(it) }
-                        })
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = {
+                                enabled = it
+                                scope.launch { app.settingRepo.setAntrianEnabled(it) }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = BRAND)
+                        )
                     }
                 }
             }
 
             if (enabled) {
                 item {
-                    Card {
-                        Column(Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Text("Prefix (Opsional)", fontWeight = FontWeight.SemiBold)
-                            OutlinedTextField(
-                                value = prefix,
-                                onValueChange = {
-                                    prefix = it.take(5)
-                                    scope.launch { app.settingRepo.setAntrianPrefix(prefix) }
-                                },
-                                label = { Text("cth: A-, ORD-") },
-                                placeholder = { Text("Kosongin kalau nggak pakai") },
-                                singleLine = true,
-                                modifier = Modifier.fillMaxWidth()
-                            )
+                    AppCard {
+                        Text("Prefix (Opsional)",
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(Sp.sm))
+                        OutlinedTextField(
+                            value = prefix,
+                            onValueChange = {
+                                prefix = it.take(5)
+                                scope.launch { app.settingRepo.setAntrianPrefix(prefix) }
+                            },
+                            label = { Text("cth: A-, ORD-") },
+                            placeholder = { Text("Kosongin kalau nggak pakai") },
+                            singleLine = true,
+                            shape = Rd.button,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(Sp.sm))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Info, null,
+                                tint = BRAND, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text("Nomor akan jadi: ${prefix}${nextNumber}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = BRAND, fontWeight = FontWeight.Bold)
@@ -805,25 +946,28 @@ fun AntrianRoute(app: IyonzApp, nav: NavHostController) {
                 }
 
                 item {
-                    Card {
-                        Column(Modifier.padding(16.dp)) {
-                            Text("Contoh Tampilan", fontWeight = FontWeight.SemiBold)
-                            Spacer(Modifier.height(8.dp))
-                            Surface(
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text("${prefix}${nextNumber}",
-                                    modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                                    style = MaterialTheme.typography.headlineLarge,
-                                    fontWeight = FontWeight.Bold, color = BRAND,
-                                    textAlign = TextAlign.Center)
-                            }
-                            Spacer(Modifier.height(6.dp))
-                            Text("Nomor reset otomatis setiap hari",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    AppCard {
+                        Text("Contoh Tampilan", fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmall)
+                        Spacer(Modifier.height(Sp.sm))
+                        Surface(
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(Rd.md),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                "${prefix}${nextNumber}",
+                                modifier = Modifier.padding(Sp.xl).fillMaxWidth(),
+                                style = MaterialTheme.typography.displaySmall,
+                                fontWeight = FontWeight.Black,
+                                color = BRAND,
+                                textAlign = TextAlign.Center
+                            )
                         }
+                        Spacer(Modifier.height(Sp.sm))
+                        Text("Nomor reset otomatis setiap hari",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
             }
@@ -858,122 +1002,132 @@ fun KeuanganRoute(app: IyonzApp, nav: NavHostController) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BRAND, titleContentColor = Color.White
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
                 )
             )
         }
     ) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            contentPadding = PaddingValues(Sp.lg),
+            verticalArrangement = Arrangement.spacedBy(Sp.md)
         ) {
             item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF43A047).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Receipt, null,
-                                    Modifier.size(22.dp), Color(0xFF43A047))
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("PPN Default", fontWeight = FontWeight.Bold)
-                                Text("Otomatis diterapkan saat transaksi",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf(0, 5, 10, 11, 12, 15).forEach { p ->
-                                FilterChip(
-                                    selected = pajakDefault == p,
-                                    onClick = {
-                                        pajakDefault = p
-                                        scope.launch { app.settingRepo.setPajakDefault(p) }
-                                    },
-                                    label = { Text(if (p == 0) "Off" else "$p%",
-                                        style = MaterialTheme.typography.bodySmall) }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF1E88E5).copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.CreditCard, null,
-                                    Modifier.size(22.dp), Color(0xFF1E88E5))
-                            }
-                            Spacer(Modifier.width(12.dp))
-                            Column(Modifier.weight(1f)) {
-                                Text("Metode Pembayaran", fontWeight = FontWeight.Bold)
-                                Text("Pilih metode yang tersedia di kasir",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        Spacer(Modifier.height(12.dp))
-                        PaymentMethod.values().forEach { m ->
-                            val aktif = m.id in metodeAktif
-                            Row(
-                                Modifier.fillMaxWidth()
-                                    .clickable {
-                                        val newSet = if (aktif) metodeAktif - m.id
-                                        else metodeAktif + m.id
-                                        metodeAktif = newSet
-                                        scope.launch { app.settingRepo.setMetodeAktif(newSet) }
-                                    }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Checkbox(
-                                    checked = aktif,
-                                    onCheckedChange = { c ->
-                                        val newSet = if (c) metodeAktif + m.id
-                                        else metodeAktif - m.id
-                                        metodeAktif = newSet
-                                        scope.launch { app.settingRepo.setMetodeAktif(newSet) }
-                                    }
-                                )
-                                Spacer(Modifier.width(8.dp))
-                                Text(m.label)
-                            }
-                        }
-                    }
-                }
-            }
-
-            item {
-                Card {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF9C27B0).copy(alpha = 0.15f)),
-                            contentAlignment = Alignment.Center) {
-                            Icon(Icons.Default.VolumeUp, null,
-                                Modifier.size(22.dp), Color(0xFF9C27B0))
-                        }
-                        Spacer(Modifier.width(12.dp))
+                AppCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            Icons.Default.Receipt,
+                            tint = Color(0xFF43A047),
+                            size = 48.dp,
+                            iconSize = 24.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
                         Column(Modifier.weight(1f)) {
-                            Text("Suara", fontWeight = FontWeight.Bold)
+                            Text("PPN Default", fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
+                            Text("Otomatis diterapkan saat transaksi",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.height(Sp.md))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(Sp.sm)) {
+                        items(listOf(0, 5, 10, 11, 12, 15)) { p ->
+                            AppChip(
+                                label = if (p == 0) "Off" else "$p%",
+                                selected = pajakDefault == p,
+                                onClick = {
+                                    pajakDefault = p
+                                    scope.launch { app.settingRepo.setPajakDefault(p) }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                AppCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            Icons.Default.CreditCard,
+                            tint = Color(0xFF1E88E5),
+                            size = 48.dp,
+                            iconSize = 24.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
+                        Column(Modifier.weight(1f)) {
+                            Text("Metode Pembayaran",
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
+                            Text("Pilih metode yang tersedia di kasir",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Spacer(Modifier.height(Sp.md))
+                    PaymentMethod.values().forEach { m ->
+                        val aktif = m.id in metodeAktif
+                        Row(
+                            Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(Rd.sm))
+                                .clickable {
+                                    val newSet = if (aktif) metodeAktif - m.id
+                                    else metodeAktif + m.id
+                                    metodeAktif = newSet
+                                    scope.launch {
+                                        app.settingRepo.setMetodeAktif(newSet)
+                                    }
+                                }
+                                .padding(vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = aktif,
+                                onCheckedChange = { c ->
+                                    val newSet = if (c) metodeAktif + m.id
+                                    else metodeAktif - m.id
+                                    metodeAktif = newSet
+                                    scope.launch {
+                                        app.settingRepo.setMetodeAktif(newSet)
+                                    }
+                                },
+                                colors = CheckboxDefaults.colors(checkedColor = BRAND)
+                            )
+                            Spacer(Modifier.width(Sp.sm))
+                            Text(m.label,
+                                style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                }
+            }
+
+            item {
+                AppCard {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            Icons.Default.VolumeUp,
+                            tint = Color(0xFF9C27B0),
+                            size = 48.dp,
+                            iconSize = 24.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
+                        Column(Modifier.weight(1f)) {
+                            Text("Suara", fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleSmall)
                             Text("Bunyi saat transaksi berhasil",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(checked = soundEnabled, onCheckedChange = {
-                            soundEnabled = it
-                            scope.launch { app.settingRepo.setSoundEnabled(it) }
-                        })
+                        Switch(
+                            checked = soundEnabled,
+                            onCheckedChange = {
+                                soundEnabled = it
+                                scope.launch { app.settingRepo.setSoundEnabled(it) }
+                            },
+                            colors = SwitchDefaults.colors(checkedTrackColor = BRAND)
+                        )
                     }
                 }
             }
@@ -997,60 +1151,95 @@ fun BarcodeInfoRoute(app: IyonzApp, nav: NavHostController) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BRAND, titleContentColor = Color.White
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
                 )
             )
         }
     ) { pad ->
         LazyColumn(
             Modifier.padding(pad).fillMaxSize(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            contentPadding = PaddingValues(Sp.lg),
+            verticalArrangement = Arrangement.spacedBy(Sp.md)
         ) {
             item {
-                Card(colors = CardDefaults.cardColors(containerColor = BRAND_LIGHT)) {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.QrCodeScanner, null,
-                            Modifier.size(40.dp), BRAND)
-                        Spacer(Modifier.width(12.dp))
+                AppCard(
+                    color = BRAND.copy(alpha = 0.08f),
+                    outlined = true
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            Icons.Default.QrCodeScanner,
+                            tint = BRAND,
+                            size = 56.dp,
+                            iconSize = 28.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
                         Column(Modifier.weight(1f)) {
                             Text("Barcode Aktif",
                                 fontWeight = FontWeight.Bold,
                                 style = MaterialTheme.typography.titleMedium)
                             Text("Scan dari kamera / galeri",
-                                style = MaterialTheme.typography.bodySmall)
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
                 }
             }
             item {
-                Card {
-                    Column(Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Cara Pakai", fontWeight = FontWeight.Bold)
-                        Text("1. Edit menu → isi field Barcode",
-                            style = MaterialTheme.typography.bodySmall)
-                        Text("2. Buka Kasir → tap ikon scan di kanan atas",
-                            style = MaterialTheme.typography.bodySmall)
-                        Text("3. Arahkan kamera → auto masuk ke keranjang",
-                            style = MaterialTheme.typography.bodySmall)
-                    }
+                AppCard {
+                    Text("Cara Pakai", fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleSmall)
+                    Spacer(Modifier.height(Sp.sm))
+                    StepRow(1, "Edit menu → isi field Barcode")
+                    StepRow(2, "Buka Kasir → tap ikon scan di kanan atas")
+                    StepRow(3, "Arahkan kamera → auto masuk ke keranjang")
                 }
             }
             item {
-                Card(colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text("💡 Format Didukung",
+                AppCard(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    outlined = true
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("💡", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(Sp.sm))
+                        Text("Format Didukung",
                             fontWeight = FontWeight.Bold,
-                            style = MaterialTheme.typography.bodySmall)
-                        Text("EAN-13, EAN-8, UPC, Code-128, Code-39, QR, Data Matrix, PDF417, Aztec",
-                            style = MaterialTheme.typography.labelSmall)
+                            style = MaterialTheme.typography.titleSmall)
                     }
+                    Spacer(Modifier.height(Sp.xs))
+                    Text(
+                        "EAN-13, EAN-8, UPC, Code-128, Code-39, QR, Data Matrix, PDF417, Aztec",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun StepRow(num: Int, text: String) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.size(24.dp).clip(CircleShape)
+                .background(BRAND),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                num.toString(),
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+        Spacer(Modifier.width(Sp.md))
+        Text(text, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -1073,46 +1262,62 @@ fun TemaRoute(app: IyonzApp, nav: NavHostController) {
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, null)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
+                )
             )
         }
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(
+            Modifier.padding(pad).fillMaxSize().padding(Sp.lg),
+            verticalArrangement = Arrangement.spacedBy(Sp.md)
+        ) {
             Text("Pilih mode terang / gelap",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             ThemeMode.values().forEach { mode ->
                 val isSelected = selected == mode
-                Card(
-                    Modifier.fillMaxWidth().clickable {
+                AppCard(
+                    onClick = {
                         selected = mode
                         ThemeManager.update(mode)
                         scope.launch { app.settingRepo.setThemeMode(mode) }
                     },
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isSelected) BRAND_LIGHT
-                        else MaterialTheme.colorScheme.surface
-                    )
+                    outlined = !isSelected,
+                    color = if (isSelected) BRAND.copy(alpha = 0.08f)
+                    else MaterialTheme.colorScheme.surface
                 ) {
-                    Row(Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Icon(when (mode) {
-                            ThemeMode.SYSTEM -> Icons.Default.SettingsBrightness
-                            ThemeMode.LIGHT -> Icons.Default.LightMode
-                            ThemeMode.DARK -> Icons.Default.DarkMode
-                        }, null, tint = BRAND)
-                        Spacer(Modifier.width(16.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconCircle(
+                            icon = when (mode) {
+                                ThemeMode.SYSTEM -> Icons.Default.SettingsBrightness
+                                ThemeMode.LIGHT -> Icons.Default.LightMode
+                                ThemeMode.DARK -> Icons.Default.DarkMode
+                            },
+                            tint = BRAND,
+                            size = 48.dp,
+                            iconSize = 24.dp
+                        )
+                        Spacer(Modifier.width(Sp.md))
                         Column(Modifier.weight(1f)) {
-                            Text(mode.label, fontWeight = FontWeight.SemiBold)
-                            Text(when (mode) {
-                                ThemeMode.SYSTEM -> "Ikut pengaturan HP"
-                                ThemeMode.LIGHT -> "Selalu terang"
-                                ThemeMode.DARK -> "Selalu gelap"
-                            }, style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(mode.label, fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                when (mode) {
+                                    ThemeMode.SYSTEM -> "Ikut pengaturan HP"
+                                    ThemeMode.LIGHT -> "Selalu terang"
+                                    ThemeMode.DARK -> "Selalu gelap"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                        RadioButton(selected = isSelected, onClick = null)
+                        if (isSelected) {
+                            Icon(Icons.Default.CheckCircle, null,
+                                tint = BRAND, modifier = Modifier.size(24.dp))
+                        }
                     }
                 }
             }
@@ -1157,61 +1362,81 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
                     IconButton(onClick = { showResetDialog = true }) {
                         Icon(Icons.Default.Refresh, null)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White
+                )
             )
         }
     ) { pad ->
         Column(Modifier.padding(pad).fillMaxSize()) {
             OutlinedTextField(
                 value = searchQuery, onValueChange = { searchQuery = it },
-                placeholder = { Text("Cari fitur...",
+                placeholder = { Text("Cari fitur…",
                     style = MaterialTheme.typography.bodySmall) },
                 leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(18.dp)) },
                 singleLine = true,
                 textStyle = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.fillMaxWidth().padding(12.dp).height(52.dp)
+                shape = Rd.button,
+                modifier = Modifier.fillMaxWidth()
+                    .padding(Sp.md).height(52.dp)
             )
-            LazyColumn(Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = 24.dp)) {
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = Sp.xxl)
+            ) {
                 grouped.forEach { (kategori, items) ->
                     item {
-                        Text("$kategori (${items.count { it.second }}/${items.size})",
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold, color = BRAND,
-                            modifier = Modifier.padding(
-                                start = 20.dp, top = 16.dp, bottom = 6.dp
-                            ))
+                        SectionHeader(
+                            title = kategori.uppercase(),
+                            subtitle = "${items.count { it.second }}/${items.size} aktif"
+                        )
                     }
                     items(items, key = { it.first.key }) { (feature, enabled) ->
-                        Surface(Modifier.fillMaxWidth(),
-                            color = MaterialTheme.colorScheme.surface) {
-                            Row(Modifier.fillMaxWidth().padding(16.dp, 12.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Column(Modifier.weight(1f)) {
-                                    Text(feature.label, fontWeight = FontWeight.Medium)
-                                    if (feature.deskripsi.isNotBlank()) {
-                                        Text(feature.deskripsi,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    }
-                                }
-                                Switch(checked = enabled, onCheckedChange = { newValue ->
-                                    scope.launch {
-                                        app.featureRepo.setEnabled(feature, newValue)
-                                        Session.current?.let { u ->
-                                            app.userRepo.log(u.id, u.nama,
-                                                if (newValue) "FEATURE_ON" else "FEATURE_OFF",
-                                                targetId = feature.key,
-                                                keterangan = feature.label)
+                        Box(Modifier.padding(horizontal = Sp.lg, vertical = 3.dp)) {
+                            AppCard {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(feature.label,
+                                            fontWeight = FontWeight.SemiBold,
+                                            style = MaterialTheme.typography.titleSmall)
+                                        if (feature.deskripsi.isNotBlank()) {
+                                            Text(feature.deskripsi,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 2,
+                                                overflow = TextOverflow.Ellipsis)
                                         }
                                     }
-                                })
+                                    Spacer(Modifier.width(Sp.sm))
+                                    Switch(
+                                        checked = enabled,
+                                        onCheckedChange = { newValue ->
+                                            scope.launch {
+                                                app.featureRepo.setEnabled(feature, newValue)
+                                                Session.current?.let { u ->
+                                                    app.userRepo.log(
+                                                        u.id, u.nama,
+                                                        if (newValue) "FEATURE_ON"
+                                                        else "FEATURE_OFF",
+                                                        targetId = feature.key,
+                                                        keterangan = feature.label
+                                                    )
+                                                }
+                                            }
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedTrackColor = BRAND
+                                        )
+                                    )
+                                }
                             }
                         }
-                        HorizontalDivider(thickness = 0.5.dp)
                     }
                 }
-                item { Spacer(Modifier.height(24.dp)) }
+                item { Spacer(Modifier.height(Sp.xxl)) }
             }
         }
     }
@@ -1219,7 +1444,7 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset ke Preset?") },
+            title = { Text("Reset ke Preset?", fontWeight = FontWeight.Bold) },
             text = { Text("Semua fitur akan dikembalikan ke default sesuai jenis usaha kamu.") },
             confirmButton = {
                 TextButton(onClick = {
@@ -1229,7 +1454,7 @@ fun FeatureToggleRoute(app: IyonzApp, nav: NavHostController) {
                         else app.featureRepo.applyPreset(bt)
                         showResetDialog = false
                     }
-                }) { Text("Reset") }
+                }) { Text("Reset", color = BRAND, fontWeight = FontWeight.Bold) }
             },
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) { Text("Batal") }
@@ -1253,6 +1478,7 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
     var logoUri by remember { mutableStateOf<String?>(null) }
     var businessType by remember { mutableStateOf(BusinessType.WARUNG) }
     var loaded by remember { mutableStateOf(false) }
+    var saving by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         nama = app.settingRepo.getNamaToko()
@@ -1286,111 +1512,194 @@ fun ProfilTokoRoute(app: IyonzApp, nav: NavHostController) {
                     }
                 },
                 actions = {
-                    TextButton(onClick = {
-                        scope.launch {
-                            app.settingRepo.set(SettingRepository.KEY_NAMA_TOKO, nama.trim())
-                            app.settingRepo.set(SettingRepository.KEY_ALAMAT, alamat.trim())
-                            app.settingRepo.set(SettingRepository.KEY_TELEPON, telepon.trim())
-                            app.settingRepo.set(SettingRepository.KEY_FOOTER, footer.trim())
-                            app.settingRepo.set(SettingRepository.KEY_LOGO, logoUri ?: "")
-                            app.settingRepo.set(SettingRepository.KEY_BUSINESS_TYPE, businessType.id)
-                            Session.current?.let { u ->
-                                app.userRepo.log(u.id, u.nama, "EDIT_PROFIL_TOKO")
+                    TextButton(
+                        onClick = {
+                            saving = true
+                            scope.launch {
+                                app.settingRepo.set(
+                                    SettingRepository.KEY_NAMA_TOKO, nama.trim())
+                                app.settingRepo.set(
+                                    SettingRepository.KEY_ALAMAT, alamat.trim())
+                                app.settingRepo.set(
+                                    SettingRepository.KEY_TELEPON, telepon.trim())
+                                app.settingRepo.set(
+                                    SettingRepository.KEY_FOOTER, footer.trim())
+                                app.settingRepo.set(
+                                    SettingRepository.KEY_LOGO, logoUri ?: "")
+                                app.settingRepo.set(
+                                    SettingRepository.KEY_BUSINESS_TYPE,
+                                    businessType.id)
+                                Session.current?.let { u ->
+                                    app.userRepo.log(u.id, u.nama, "EDIT_PROFIL_TOKO")
+                                }
+                                saving = false
+                                nav.popBackStack()
                             }
-                            nav.popBackStack()
-                        }
-                    }) { Text("Simpan", color = Color.White, fontWeight = FontWeight.Bold) }
+                        },
+                        enabled = !saving
+                    ) {
+                        Text("Simpan", color = Color.White,
+                            fontWeight = FontWeight.Bold)
+                    }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = BRAND, titleContentColor = Color.White
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White,
+                    actionIconContentColor = Color.White
                 )
             )
         }
     ) { pad ->
         if (!loaded) {
-            Box(Modifier.padding(pad).fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
+            Box(Modifier.padding(pad).fillMaxSize(),
+                contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = BRAND)
             }
         } else {
             LazyColumn(
                 Modifier.padding(pad).fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                contentPadding = PaddingValues(Sp.lg),
+                verticalArrangement = Arrangement.spacedBy(Sp.md)
             ) {
+                // Logo picker
                 item {
-                    Column(Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
                         Box(
-                            Modifier.size(100.dp).clip(CircleShape).background(BRAND_LIGHT)
+                            Modifier.size(120.dp).clip(CircleShape)
+                                .background(BRAND.copy(alpha = 0.1f))
+                                .border(2.dp, BRAND.copy(alpha = 0.2f), CircleShape)
                                 .clickable { picker.launch(arrayOf("image/*")) },
                             contentAlignment = Alignment.Center
                         ) {
                             if (logoUri != null) {
-                                AsyncImage(model = logoUri, contentDescription = null,
+                                AsyncImage(
+                                    model = logoUri,
+                                    contentDescription = null,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize())
+                                    modifier = Modifier.fillMaxSize()
+                                )
                             } else {
-                                Icon(Icons.Default.AddPhotoAlternate, null,
-                                    tint = BRAND, modifier = Modifier.size(40.dp))
+                                Icon(
+                                    Icons.Default.AddPhotoAlternate, null,
+                                    tint = BRAND,
+                                    modifier = Modifier.size(48.dp)
+                                )
+                            }
+                            // Edit badge
+                            Surface(
+                                modifier = Modifier.align(Alignment.BottomEnd),
+                                color = BRAND,
+                                shape = CircleShape,
+                                shadowElevation = 4.dp
+                            ) {
+                                Box(Modifier.size(32.dp),
+                                    contentAlignment = Alignment.Center) {
+                                    Icon(Icons.Default.Edit, null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(16.dp))
+                                }
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(Sp.sm))
                         Text("Tap logo untuk ganti",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+
                 item {
-                    OutlinedTextField(nama, { nama = it },
+                    SectionHeader(title = "INFO TOKO")
+                }
+
+                item {
+                    OutlinedTextField(
+                        nama, { nama = it },
                         label = { Text("Nama toko *") },
-                        modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        leadingIcon = { Icon(Icons.Default.Store, null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = Rd.button
+                    )
                 }
                 item {
-                    OutlinedTextField(alamat, { alamat = it },
+                    OutlinedTextField(
+                        alamat, { alamat = it },
                         label = { Text("Alamat") },
-                        modifier = Modifier.fillMaxWidth(), maxLines = 2)
+                        leadingIcon = { Icon(Icons.Default.LocationOn, null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 2,
+                        shape = Rd.button
+                    )
                 }
                 item {
-                    OutlinedTextField(telepon,
+                    OutlinedTextField(
+                        telepon,
                         { telepon = it.filter { c -> c.isDigit() || c == '+' } },
                         label = { Text("No. WhatsApp / Telp") },
+                        leadingIcon = { Icon(Icons.Default.Phone, null) },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-                        modifier = Modifier.fillMaxWidth(), singleLine = true)
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        shape = Rd.button
+                    )
                 }
                 item {
-                    OutlinedTextField(footer, { footer = it },
+                    OutlinedTextField(
+                        footer, { footer = it },
                         label = { Text("Footer struk") },
-                        modifier = Modifier.fillMaxWidth(), maxLines = 2)
+                        leadingIcon = { Icon(Icons.Default.Receipt, null) },
+                        modifier = Modifier.fillMaxWidth(),
+                        maxLines = 2,
+                        shape = Rd.button
+                    )
                 }
+
                 item {
-                    Text("Jenis Usaha", fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 8.dp))
+                    SectionHeader(title = "JENIS USAHA")
                 }
+
                 items(BusinessType.values().toList()) { bt ->
                     val selected = businessType == bt
-                    Card(
-                        Modifier.fillMaxWidth().clickable { businessType = bt },
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (selected) BRAND_LIGHT
-                            else MaterialTheme.colorScheme.surface
-                        )
+                    AppCard(
+                        onClick = { businessType = bt },
+                        outlined = !selected,
+                        color = if (selected) BRAND.copy(alpha = 0.08f)
+                        else MaterialTheme.colorScheme.surface
                     ) {
-                        Row(Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(bt.emoji, style = MaterialTheme.typography.titleLarge)
-                            Spacer(Modifier.width(12.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                Modifier.size(48.dp).clip(RoundedCornerShape(Rd.md))
+                                    .background(
+                                        if (selected) BRAND.copy(alpha = 0.15f)
+                                        else MaterialTheme.colorScheme.surfaceVariant
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(bt.emoji,
+                                    style = MaterialTheme.typography.titleLarge)
+                            }
+                            Spacer(Modifier.width(Sp.md))
                             Column(Modifier.weight(1f)) {
-                                Text(bt.label, fontWeight = FontWeight.SemiBold)
+                                Text(bt.label, fontWeight = FontWeight.SemiBold,
+                                    style = MaterialTheme.typography.titleSmall)
                                 Text(bt.deskripsi,
                                     style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis)
                             }
-                            RadioButton(selected = selected,
-                                onClick = { businessType = bt })
+                            if (selected) {
+                                Icon(Icons.Default.CheckCircle, null,
+                                    tint = BRAND, modifier = Modifier.size(24.dp))
+                            }
                         }
                     }
                 }
-                item { Spacer(Modifier.height(24.dp)) }
+
+                item { Spacer(Modifier.height(Sp.xxl)) }
             }
         }
     }
@@ -1410,34 +1719,92 @@ fun TentangRoute(nav: NavHostController) {
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.Default.ArrowBack, null)
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = BRAND, titleContentColor = Color.White,
+                    navigationIconContentColor = Color.White
+                )
             )
         }
     ) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(24.dp))
-            Box(Modifier.size(96.dp).clip(RoundedCornerShape(24.dp)).background(BRAND),
-                contentAlignment = Alignment.Center) {
-                Icon(Icons.Default.PointOfSale, null,
-                    tint = Color.White, modifier = Modifier.size(56.dp))
+        Column(
+            Modifier.padding(pad).fillMaxSize().padding(Sp.xxl),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(Sp.xxl))
+
+            // App icon
+            Box(
+                Modifier.size(120.dp).clip(RoundedCornerShape(Rd.xl))
+                    .background(
+                        Brush.linearGradient(listOf(BRAND, BRAND_DARK))
+                    )
+                    .shadow(12.dp, RoundedCornerShape(Rd.xl)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.PointOfSale, null,
+                    tint = Color.White,
+                    modifier = Modifier.size(64.dp)
+                )
             }
-            Spacer(Modifier.height(16.dp))
-            Text("iyonzkasir", style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold, color = BRAND)
-            Text("v0.8.0", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(24.dp))
-            Text("Aplikasi kasir serbaguna untuk semua jenis usaha:\n" +
-                 "warung, retail, cafe, restoran, laundry, toko bangunan, dan jasa.\n\n" +
-                 "Offline by default, simple by default, aman by design.",
-                style = MaterialTheme.typography.bodyMedium,
-                textAlign = TextAlign.Center)
+
+            Spacer(Modifier.height(Sp.lg))
+            Text(
+                "iyonzkasir",
+                style = MaterialTheme.typography.displaySmall,
+                fontWeight = FontWeight.Black,
+                color = BRAND
+            )
+            Text(
+                "v0.8.0",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.height(Sp.xxl))
+
+            AppCard {
+                Text(
+                    "Aplikasi kasir serbaguna untuk semua jenis usaha: warung, retail, cafe, restoran, laundry, toko bangunan, dan jasa.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(Sp.md))
+                AppDivider()
+                Spacer(Modifier.height(Sp.md))
+                Row(horizontalArrangement = Arrangement.spacedBy(Sp.sm)) {
+                    StatMini("⚡", "Offline", "Jalan tanpa internet")
+                }
+                Spacer(Modifier.height(Sp.sm))
+                StatMini("🔒", "Aman", "Backup terenkripsi")
+                Spacer(Modifier.height(Sp.sm))
+                StatMini("🎨", "Custom", "Fitur bisa diatur")
+            }
+
             Spacer(Modifier.weight(1f))
-            Text("© 2025 iyonzkasir",
+            Text(
+                "© 2025 iyonzkasir",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
 
+@Composable
+private fun StatMini(emoji: String, title: String, desc: String) {
+    Row(
+        Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(emoji, style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.width(Sp.md))
+        Column {
+            Text(title, fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleSmall)
+            Text(desc, style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+}
