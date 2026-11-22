@@ -65,7 +65,7 @@ object PinHasher {
 }
 
 // ═══════════════════════════════════════════════════════════
-// SPLASH SCREEN
+// SPLASH SCREEN — Animasi Loading Pembuka
 // ═══════════════════════════════════════════════════════════
 @Composable
 fun SplashScreen(
@@ -74,46 +74,140 @@ fun SplashScreen(
     onNeedOnboarding: () -> Unit,
     onNeedLogin: () -> Unit
 ) {
+    var startAnim by remember { mutableStateOf(false) }
+
+    // Animasi masuk logo & teks
+    val logoScale by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (startAnim) 1f else 0.35f,
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
+        ),
+        label = "logoScale"
+    )
+    val contentAlpha by androidx.compose.animation.core.animateFloatAsState(
+        targetValue = if (startAnim) 1f else 0f,
+        animationSpec = androidx.compose.animation.core.tween(durationMillis = 700),
+        label = "contentAlpha"
+    )
+
+    // Animasi gelombang berdenyut (infinite)
+    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "splashPulse")
+    val pulseScale by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.28f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "pulseScale"
+    )
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.30f,
+        targetValue = 0.04f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+    val dotPhase by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 3f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            animation = androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
+        ),
+        label = "dotPhase"
+    )
+
     LaunchedEffect(Unit) {
-        delay(700)
+        startAnim = true
+        delay(1800)
         val done = settingRepo.isOnboardingDone()
         val ownerCount = userRepo.ownerCount()
         if (!done || ownerCount == 0) onNeedOnboarding() else onNeedLogin()
     }
+
     Box(
         Modifier.fillMaxSize().background(
             Brush.verticalGradient(listOf(BRAND, BRAND_DARK))
         ),
         contentAlignment = Alignment.Center
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Box(
-                Modifier
-                    .size(120.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.15f))
-                    .border(1.5.dp, Color.White.copy(alpha = 0.25f), CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    Icons.Default.PointOfSale, null,
-                    Modifier.size(64.dp),
-                    tint = Color.White
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(horizontal = Sp.xl)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                // Lingkaran gelombang berdenyut di belakang logo
+                Box(
+                    Modifier
+                        .size(124.dp)
+                        .scale(pulseScale)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = pulseAlpha))
                 )
+                // Lingkaran utama ikon kasir
+                Box(
+                    Modifier
+                        .size(116.dp)
+                        .scale(logoScale)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.18f))
+                        .border(2.dp, Color.White.copy(alpha = 0.35f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.PointOfSale,
+                        contentDescription = null,
+                        modifier = Modifier.size(60.dp),
+                        tint = Color.White
+                    )
+                }
             }
+
             Spacer(Modifier.height(Sp.xl))
+
             Text(
-                "iyonzkasir",
+                text = "iyonzkasir",
                 style = MaterialTheme.typography.displaySmall,
-                color = Color.White,
+                color = Color.White.copy(alpha = contentAlpha),
                 fontWeight = FontWeight.Black
             )
-            Spacer(Modifier.height(Sp.sm))
+
+            Spacer(Modifier.height(Sp.xs))
+
             Text(
-                "Kasir serbaguna untuk semua usaha",
+                text = "Kasir serbaguna untuk semua usaha",
                 style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = 0.85f)
+                color = Color.White.copy(alpha = contentAlpha * 0.88f),
+                textAlign = TextAlign.Center
             )
+
+            Spacer(Modifier.height(Sp.xxl))
+
+            // Indikator 3 titik loading beranimasi
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                repeat(3) { index ->
+                    val active = dotPhase.toInt() == index
+                    val dotScale by androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (active) 1.35f else 0.85f,
+                        animationSpec = androidx.compose.animation.core.tween(250),
+                        label = "dotScale_$index"
+                    )
+                    Box(
+                        Modifier
+                            .size(10.dp)
+                            .scale(dotScale)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = if (active) 1f else 0.45f))
+                    )
+                }
+            }
         }
     }
 }
