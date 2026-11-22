@@ -97,7 +97,7 @@ fun SplashScreen(
             Text("🇮🇩 AIYONZ KASIR POS", Modifier.padding(horizontal = 18.dp, vertical = 8.dp), color = Color.White, fontWeight = FontWeight.Black)
         }
         androidx.compose.foundation.Image(
-            painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_splash_pos),
+            painter = androidx.compose.ui.res.painterResource(id = com.iyonzkasir.R.drawable.ic_splash_pos),
             contentDescription = "Kasir",
             modifier = Modifier.size(220.dp).offset(y = dy.dp).scale(scale)
         )
