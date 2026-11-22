@@ -17,8 +17,10 @@ android {
         versionCode = 1
         versionName = "0.7.0"
     }
+    signingConfigs { create("release") { storeFile = file("release.keystore"); storePassword = "iyonzkasir2026"; keyAlias = "iyonzkasir"; keyPassword = "iyonzkasir2026" } }
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
