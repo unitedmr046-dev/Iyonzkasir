@@ -75,140 +75,46 @@ fun SplashScreen(
     onNeedOnboarding: () -> Unit,
     onNeedLogin: () -> Unit
 ) {
-    var startAnim by remember { mutableStateOf(false) }
-
-    // Animasi masuk logo & teks
-    val logoScale by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (startAnim) 1f else 0.35f,
-        animationSpec = androidx.compose.animation.core.spring(
-            dampingRatio = androidx.compose.animation.core.Spring.DampingRatioMediumBouncy,
-            stiffness = androidx.compose.animation.core.Spring.StiffnessLow
-        ),
-        label = "logoScale"
-    )
-    val contentAlpha by androidx.compose.animation.core.animateFloatAsState(
-        targetValue = if (startAnim) 1f else 0f,
-        animationSpec = androidx.compose.animation.core.tween(durationMillis = 700),
-        label = "contentAlpha"
-    )
-
-    // Animasi gelombang berdenyut (infinite)
-    val infiniteTransition = androidx.compose.animation.core.rememberInfiniteTransition(label = "splashPulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.28f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.30f,
-        targetValue = 0.04f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(1100, easing = androidx.compose.animation.core.FastOutSlowInEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
-    )
-    val dotPhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 3f,
-        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
-            animation = androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = androidx.compose.animation.core.RepeatMode.Restart
-        ),
-        label = "dotPhase"
-    )
+    var anim by remember { mutableStateOf(false) }
+    var prog by remember { mutableFloatStateOf(0f) }
+    val scale by animateFloatAsState(if (anim) 1f else 0.2f, spring(0.5f, 200f), label = "s")
+    val progressAnim by animateFloatAsState(prog, tween(2500), label = "p")
+    val inf = rememberInfiniteTransition(label = "inf")
+    val dy by inf.animateFloat(-8f, 8f, infiniteRepeatable(tween(1200), RepeatMode.Reverse), label = "dy")
 
     LaunchedEffect(Unit) {
-        startAnim = true
-        delay(1800)
-        val done = settingRepo.isOnboardingDone()
-        val ownerCount = userRepo.ownerCount()
-        if (!done || ownerCount == 0) onNeedOnboarding() else onNeedLogin()
+        anim = true; prog = 1f; delay(2800)
+        if (!settingRepo.isOnboardingDone() || userRepo.ownerCount() == 0) onNeedOnboarding() else onNeedLogin()
     }
 
-    Box(
-        Modifier.fillMaxSize().background(
-            Brush.verticalGradient(listOf(BRAND, BRAND_DARK))
-        ),
-        contentAlignment = Alignment.Center
+    Column(
+        Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF9A0007), Color(0xFFD32F2F), Color.White, Color.White))).padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(horizontal = Sp.xl)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                // Lingkaran gelombang berdenyut di belakang logo
-                Box(
-                    Modifier
-                        .size(124.dp)
-                        .scale(pulseScale)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = pulseAlpha))
-                )
-                // Lingkaran utama ikon kasir
-                Box(
-                    Modifier
-                        .size(116.dp)
-                        .scale(logoScale)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.18f))
-                        .border(2.dp, Color.White.copy(alpha = 0.35f), CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        Icons.Default.PointOfSale,
-                        contentDescription = null,
-                        modifier = Modifier.size(60.dp),
-                        tint = Color.White
-                    )
+        Spacer(Modifier.height(16.dp))
+        Surface(color = Color.White.copy(alpha = 0.2f), shape = RoundedCornerShape(50), border = BorderStroke(1.5.dp, Color.White)) {
+            Text("🇮🇩 AIYONZ KASIR POS", Modifier.padding(horizontal = 18.dp, vertical = 8.dp), color = Color.White, fontWeight = FontWeight.Black)
+        }
+        androidx.compose.foundation.Image(
+            painter = androidx.compose.ui.res.painterResource(id = R.drawable.ic_splash_pos),
+            contentDescription = "Kasir",
+            modifier = Modifier.size(220.dp).offset(y = dy.dp).scale(scale)
+        )
+        Surface(color = Color.White, shape = RoundedCornerShape(24.dp), shadowElevation = 10.dp, border = BorderStroke(2.dp, Color(0xFFD32F2F)), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(22.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Selamat Datang di", style = MaterialTheme.typography.titleMedium, color = Color.DarkGray, fontWeight = FontWeight.Bold)
+                Text("Aiyonz Kasir", style = MaterialTheme.typography.displaySmall, color = Color(0xFFD32F2F), fontWeight = FontWeight.Black)
+                Spacer(Modifier.height(6.dp))
+                Surface(color = Color(0xFFD32F2F), shape = RoundedCornerShape(50)) {
+                    Text("⭐ TERKEREN ⭐", Modifier.padding(horizontal = 16.dp, vertical = 4.dp), color = Color.White, fontWeight = FontWeight.Black)
                 }
             }
-
-            Spacer(Modifier.height(Sp.xl))
-
-            Text(
-                text = "iyonzkasir",
-                style = MaterialTheme.typography.displaySmall,
-                color = Color.White.copy(alpha = contentAlpha),
-                fontWeight = FontWeight.Black
-            )
-
-            Spacer(Modifier.height(Sp.xs))
-
-            Text(
-                text = "Kasir serbaguna untuk semua usaha",
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color.White.copy(alpha = contentAlpha * 0.88f),
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(Modifier.height(Sp.xxl))
-
-            // Indikator 3 titik loading beranimasi
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                repeat(3) { index ->
-                    val active = dotPhase.toInt() == index
-                    val dotScale by androidx.compose.animation.core.animateFloatAsState(
-                        targetValue = if (active) 1.35f else 0.85f,
-                        animationSpec = androidx.compose.animation.core.tween(250),
-                        label = "dotScale_$index"
-                    )
-                    Box(
-                        Modifier
-                            .size(10.dp)
-                            .scale(dotScale)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = if (active) 1f else 0.45f))
-                    )
-                }
-            }
+        }
+        Column(Modifier.fillMaxWidth(0.85f), horizontalAlignment = Alignment.CenterHorizontally) {
+            LinearProgressIndicator(progress = { progressAnim }, modifier = Modifier.fillMaxWidth().height(10.dp).clip(CircleShape), color = Color(0xFFD32F2F), trackColor = Color(0xFFFFCDD2))
+            Spacer(Modifier.height(8.dp))
+            Text("Memuat Aiyonz Kasir... ${(progressAnim * 100).toInt()}%", color = Color(0xFF9A0007), fontWeight = FontWeight.Bold)
         }
     }
 }

@@ -48,7 +48,7 @@ enum class AppTheme(
 
 // ═══════ BRAND COLORS (dynamic) ═══════
 object BrandColors {
-    var theme by mutableStateOf(AppTheme.ORANGE)
+    var theme by mutableStateOf(AppTheme.MERAH)
         private set
 
     val primary: Color get() = Color(theme.primaryHex)
